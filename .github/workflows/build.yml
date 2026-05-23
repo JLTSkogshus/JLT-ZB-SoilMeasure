@@ -52,31 +52,23 @@ jobs:
         id: cache
         uses: actions/cache@v4
         with:
-          path: ~/.arduino15
-          key: arduino15-esp32-3.3.8-libs-v1
-          restore-keys: arduino15-esp32-3.3.8-
+          path: |
+            ~/.arduino15
+            ~/Arduino/libraries
+          key: arduino15-esp32-3.3.8-libs-v2
+          restore-keys: |
+            arduino15-esp32-3.3.8-libs-
+            arduino15-esp32-3.3.8-
 
-      - name: Install ESP32 board package
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Install ESP32 board package and libraries
         run: |
           arduino-cli config add board_manager.additional_urls \
             https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core update-index
           arduino-cli core install esp32:esp32@3.3.8
-
-      - name: Install libraries
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
+          arduino-cli lib update-index
           arduino-cli lib install "Adafruit ADS1X15"
           arduino-cli lib install "Adafruit BusIO"
-
-      # Ensure the board URL is in the config even on a cache hit
-      # (the config file is inside the cached directory, so this is a no-op when cached)
-      - name: Ensure board URL is configured
-        if: steps.cache.outputs.cache-hit == 'true'
-        run: |
-          arduino-cli config add board_manager.additional_urls \
-            https://espressif.github.io/arduino-esp32/package_esp32_index.json || true
 
       # ── Patch OTA_RUNNING_VERSION to match release tag ────────────────────────
       - name: Patch firmware version
