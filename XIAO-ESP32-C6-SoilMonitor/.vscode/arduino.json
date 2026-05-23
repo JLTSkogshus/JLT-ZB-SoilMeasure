@@ -1,0 +1,6 @@
+{
+  "board": "Seeed Studio XIAO ESP32C6",
+  "fqbn": "esp32:esp32:XIAO_ESP32C6:ZigbeeMode=ed,CDCOnBoot=default,CPUFreq=160,FlashFreq=80,FlashMode=qio,FlashSize=4M,PartitionScheme=zigbee,DebugLevel=none,EraseFlash=none",
+  "sketch": "XIAO-ESP32-C6-SoilMonitor.ino",
+  "port": ""
+}

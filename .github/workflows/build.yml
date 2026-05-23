@@ -1,0 +1,167 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v[0-9]*']        # e.g. v1.1.0
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: write            # required for creating GitHub Releases
+
+env:
+  SKETCH: XIAO-ESP32-C6-SoilMonitor
+  FQBN:   esp32:esp32:XIAO_ESP32C6:ZigbeeMode=ed,PartitionScheme=zigbee
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Parse version from tag (v1.2.3 → hex 0x01020300u) ────────────────────
+      - name: Determine version
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/v}"
+            IFS='.' read -r maj min pat _rest <<< "$TAG"
+            HEX=$(printf "0x%02X%02X%02X00u" "${maj:-0}" "${min:-0}" "${pat:-0}")
+            echo "tag=$TAG"            >> $GITHUB_OUTPUT
+            echo "hex=$HEX"           >> $GITHUB_OUTPUT
+            echo "is_release=true"    >> $GITHUB_OUTPUT
+          else
+            echo "tag=dev-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+            echo "hex=0x00000000u"           >> $GITHUB_OUTPUT
+            echo "is_release=false"          >> $GITHUB_OUTPUT
+          fi
+
+      # ── Arduino CLI ───────────────────────────────────────────────────────────
+      - name: Set up Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: latest
+
+      # Cache the entire ~/.arduino15 directory (board packages + libraries ~1.5 GB).
+      # The key includes the ESP32 version so the cache is rebuilt on toolchain bumps.
+      - name: Cache Arduino packages
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino15-esp32-3.3.8-libs-v1
+          restore-keys: arduino15-esp32-3.3.8-
+
+      - name: Install ESP32 board package
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          arduino-cli config add board_manager.additional_urls \
+            https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.8
+
+      - name: Install libraries
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          arduino-cli lib install "Adafruit ADS1X15"
+          arduino-cli lib install "Adafruit BusIO"
+
+      # Ensure the board URL is in the config even on a cache hit
+      # (the config file is inside the cached directory, so this is a no-op when cached)
+      - name: Ensure board URL is configured
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: |
+          arduino-cli config add board_manager.additional_urls \
+            https://espressif.github.io/arduino-esp32/package_esp32_index.json || true
+
+      # ── Patch OTA_RUNNING_VERSION to match release tag ────────────────────────
+      - name: Patch firmware version
+        if: steps.ver.outputs.is_release == 'true'
+        env:
+          VER_HEX: ${{ steps.ver.outputs.hex }}
+          VER_TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          python3 - << 'PYEOF'
+          import re, os
+          hex_ver = os.environ['VER_HEX']
+          tag     = os.environ['VER_TAG']
+          path    = os.environ['SKETCH'] + '/config.h'
+          content = open(path).read()
+          content = re.sub(
+              r'#define OTA_RUNNING_VERSION\s+\S+',
+              f'#define OTA_RUNNING_VERSION    {hex_ver}',
+              content)
+          open(path, 'w').write(content)
+          print(f'OTA_RUNNING_VERSION → {hex_ver}  (v{tag})')
+          PYEOF
+
+      # ── Compile ───────────────────────────────────────────────────────────────
+      - name: Compile sketch
+        run: |
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn "${{ env.FQBN }}" \
+            --output-dir build \
+            "${{ env.SKETCH }}"
+
+      # ── Create Zigbee OTA image (.zigbee) ─────────────────────────────────────
+      - name: Create OTA image
+        if: steps.ver.outputs.is_release == 'true'
+        run: |
+          python3 tools/create_ota_image.py \
+            "build/${{ env.SKETCH }}.ino.bin" \
+            "${{ steps.ver.outputs.tag }}" \
+            "build/JLT-ZB-SoilMeasure_v${{ steps.ver.outputs.tag }}.zigbee"
+
+      # ── Upload build artifacts (visible on every run, 90-day retention) ───────
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ steps.ver.outputs.tag }}
+          path: |
+            build/${{ env.SKETCH }}.ino.bin
+            build/${{ env.SKETCH }}.ino.bootloader.bin
+            build/${{ env.SKETCH }}.ino.partitions.bin
+            build/*.zigbee
+          if-no-files-found: ignore
+          retention-days: 90
+
+      # ── Create a GitHub Release on version tags ───────────────────────────────
+      - name: Create GitHub Release
+        if: steps.ver.outputs.is_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.ver.outputs.tag }}"
+          body: |
+            ## JLT ZB-SoilMeasure v${{ steps.ver.outputs.tag }}
+
+            | File | Purpose |
+            |------|---------|
+            | `*.ino.bin` | Flash via USB with `arduino-cli upload` |
+            | `*.ino.bootloader.bin` | Bootloader (needed for full erase-flash) |
+            | `*.ino.partitions.bin` | Partition table |
+            | `*.zigbee` | **OTA update via zigbee2mqtt** (no USB needed) |
+
+            ### OTA update steps
+            1. Copy `JLT-ZB-SoilMeasure_v${{ steps.ver.outputs.tag }}.zigbee` to your zigbee2mqtt data directory
+            2. In z2m web UI: **Devices → JLT ZB-SoilMeasure → OTA → Perform update**
+            3. The device picks up the update on its next wake-up (within `sleep_duration` seconds)
+
+            ### USB flash
+            ```
+            arduino-cli upload \
+              --fqbn "esp32:esp32:XIAO_ESP32C6:ZigbeeMode=ed,PartitionScheme=zigbee" \
+              --port COM<N> \
+              --input-file JLT-ZB-SoilMeasure_v${{ steps.ver.outputs.tag }}.ino.bin
+            ```
+          files: |
+            build/${{ env.SKETCH }}.ino.bin
+            build/${{ env.SKETCH }}.ino.bootloader.bin
+            build/${{ env.SKETCH }}.ino.partitions.bin
+            build/JLT-ZB-SoilMeasure_v${{ steps.ver.outputs.tag }}.zigbee
+          draft: false
+          prerelease: false

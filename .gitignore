@@ -1,0 +1,18 @@
+# Compiled build outputs
+build/
+
+# Generated Zigbee OTA images
+*.zigbee
+
+# Arduino IDE / CLI temp files
+*.elf
+*.map
+/XIAO-ESP32-C6-SoilMonitor/build/
+
+# VS Code local overrides (keep tasks.json and arduino.json)
+.vscode/settings.json
+.vscode/launch.json
+
+# OS clutter
+.DS_Store
+Thumbs.db

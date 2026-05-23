@@ -1,0 +1,73 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    // ─── Compile ──────────────────────────────────────────────────────────────
+    {
+      "label": "Compile",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "compile",
+        "--fqbn", "esp32:esp32:XIAO_ESP32C6:ZigbeeMode=ed,PartitionScheme=zigbee",
+        "--output-dir", "${workspaceFolder}/build",
+        "${workspaceFolder}/XIAO-ESP32-C6-SoilMonitor"
+      ],
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+
+    // ─── Upload ───────────────────────────────────────────────────────────────
+    {
+      "label": "Upload",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "upload",
+        "--fqbn", "esp32:esp32:XIAO_ESP32C6:ZigbeeMode=ed,PartitionScheme=zigbee",
+        "--port", "COM5",
+        "${workspaceFolder}/XIAO-ESP32-C6-SoilMonitor"
+      ],
+      "dependsOn": "Compile",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+
+    // ─── Create OTA image ─────────────────────────────────────────────────────
+    // Run "Compile" first (it puts the .bin in the build/ folder), then run
+    // this task to wrap it in the Zigbee OTA file format.
+    //
+    // Change the version string to a value HIGHER than OTA_RUNNING_VERSION
+    // in config.h so the device accepts the update.
+    {
+      "label": "Create OTA image",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "${workspaceFolder}/../tools/create_ota_image.py",
+        "${workspaceFolder}/build/XIAO-ESP32-C6-SoilMonitor.ino.bin",
+        "1.1.0.0"
+      ],
+      "dependsOn": "Compile",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+
+    // ─── Serial monitor ───────────────────────────────────────────────────────
+    {
+      "label": "Serial monitor",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "monitor",
+        "--port", "COM5",
+        "--config", "baudrate=115200"
+      ],
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": []
+    }
+  ]
+}
