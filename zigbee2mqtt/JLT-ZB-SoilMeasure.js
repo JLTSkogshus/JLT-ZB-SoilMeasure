@@ -14,6 +14,13 @@
 //      external_converters:
 //        - JLT-ZB-SoilMeasure.js
 //
+//      ota:
+//        zigbee_ota_override_index_location: 'https://raw.githubusercontent.com/JLTSkogshus/JLT-ZB-SoilMeasure/master/ota/index.json'
+//
+//    This lets zigbee2mqtt automatically discover the latest firmware from
+//    GitHub Releases.  When a new version is published the OTA tab in the
+//    device page will offer the update; no manual file copying needed.
+//
 // 3. Restart zigbee2mqtt.
 //
 // ATTRIBUTES EXPOSED
@@ -171,6 +178,7 @@ const definition = {
     fromZigbee:  [fzMoisture, e.battery ? require('zigbee-herdsman-converters/converters/fromZigbee').battery : null, fzCal].filter(Boolean),
     toZigbee:    [tzCal],
     exposes:     buildExposes(),
+    ota:         true,
     meta:        {multiEndpoint: true},
     endpoint:    () => endpointMap(),
 };
