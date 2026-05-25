@@ -81,12 +81,18 @@ const fzMoisture = {
 
 // ─── fromZigbee: OTA cluster → human-readable firmware_version ───────────────
 // currentFileVersion encoding: 0xMMmmppbb → "MM.mm.pp"
+// The device sends its version inside the ZCL "Query Next Image Request" command
+// (triggered by requestOTAUpdate()), not as an attribute report.  We catch both
+// the command and plain attribute reads so the expose populates either way.
 const fzFirmwareVersion = {
     cluster: 'genOta',
-    type: ['attributeReport', 'readResponse'],
+    type: ['attributeReport', 'readResponse', 'commandQueryNextImageRequest'],
     convert(model, msg, publish, options, meta) {
-        if (msg.data['currentFileVersion'] !== undefined) {
-            const v     = msg.data['currentFileVersion'] >>> 0;
+        // Query Next Image Request carries the version in msg.data.currentFileVersion
+        // Attribute read/report carries it in msg.data['currentFileVersion']
+        const raw = msg.data['currentFileVersion'] ?? msg.data.currentFileVersion;
+        if (raw !== undefined) {
+            const v     = raw >>> 0;
             const major = (v >>> 24) & 0xFF;
             const minor = (v >>> 16) & 0xFF;
             const patch = (v >>>  8) & 0xFF;
