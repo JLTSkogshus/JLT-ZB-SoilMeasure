@@ -1,12 +1,27 @@
 #include "zigbee_soil_sensor.h"
 #include "calibration.h"
 #include "config.h"
+#include <zcl/esp_zigbee_zcl_basic.h>   // ESP_ZB_ZCL_ATTR_BASIC_SW_BUILD_ID
 
 // Static per-sensor attribute storage – pointers passed to ZCL must remain valid
 // for the lifetime of the endpoint (i.e. forever for global objects).
 static uint16_t s_calDry[9];
 static uint16_t s_calWet[9];
 static uint32_t s_sleepSec;   // device-wide, shared by all endpoint instances
+
+// =============================================================================
+// setSoftwareBuildId() – writes the ZCL character string to Basic cluster 0x4000
+// =============================================================================
+void ZigbeeSoilSensor::setSoftwareBuildId(const char* id) {
+    uint8_t len = (uint8_t)strnlen(id, 16);
+    uint8_t zcl_str[17] = {};   // ZCL char string: length byte + up to 16 chars
+    zcl_str[0] = len;
+    memcpy(zcl_str + 1, id, len);
+    esp_zb_attribute_list_t *basic_cluster = esp_zb_cluster_list_get_cluster(
+        _cluster_list, ESP_ZB_ZCL_CLUSTER_ID_BASIC, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+    if (basic_cluster == nullptr) return;
+    esp_zb_basic_cluster_add_attr(basic_cluster, ESP_ZB_ZCL_ATTR_BASIC_SW_BUILD_ID, zcl_str);
+}
 
 // =============================================================================
 // Constructor

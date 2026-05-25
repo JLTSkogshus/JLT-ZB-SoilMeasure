@@ -114,9 +114,16 @@ void setup() {
   // ── Configure Zigbee endpoints ──────────────────────────────────────────────  // OTA client lives on endpoint 1 (zbSoil0) – one per device is sufficient.
   zbSoil0.addOTAClient(OTA_RUNNING_VERSION, OTA_RUNNING_VERSION, OTA_HW_VERSION);
   zbSoil0.onOTAStateChange(onOtaState);
+  // Build version string from OTA_RUNNING_VERSION (0xMMmmppbb → "MM.mm.pp")
+  char s_verStr[10];
+  snprintf(s_verStr, sizeof(s_verStr), "%u.%u.%u",
+    (OTA_RUNNING_VERSION >> 24) & 0xFFu,
+    (OTA_RUNNING_VERSION >> 16) & 0xFFu,
+    (OTA_RUNNING_VERSION >>  8) & 0xFFu);
   for (int i = 0; i < NUM_SENSORS; i++) {
     zbSoils[i]->setManufacturerAndModel(ZIGBEE_MANUFACTURER, ZIGBEE_MODEL);
-    zbSoils[i]->setVersion((OTA_RUNNING_VERSION >> 24) & 0xFF);  // major version → Basic cluster AppVersion
+    zbSoils[i]->setVersion((OTA_RUNNING_VERSION >> 24) & 0xFF);  // AppVersion byte
+    zbSoils[i]->setSoftwareBuildId(s_verStr);                    // "1.0.0" → z2m About tab
     zbSoils[i]->setPowerSource(ZB_POWER_SOURCE_BATTERY, readBatteryPercent());
     Zigbee.addEndpoint(zbSoils[i]);
   }
