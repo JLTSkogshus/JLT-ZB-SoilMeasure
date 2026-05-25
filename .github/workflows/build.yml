@@ -108,6 +108,11 @@ jobs:
             "build/${{ env.SKETCH }}.ino.bin" \
             "${{ steps.ver.outputs.tag }}" \
             "build/JLT-ZB-SoilMeasure_v${{ steps.ver.outputs.tag }}.zigbee"
+          # Fixed-name copies → stable /releases/latest/download/ URLs
+          cp "build/JLT-ZB-SoilMeasure_v${{ steps.ver.outputs.tag }}.zigbee" \
+             "build/JLT-ZB-SoilMeasure.zigbee"
+          cp "build/${{ env.SKETCH }}.ino.bin" \
+             "build/JLT-ZB-SoilMeasure.bin"
 
       # ── Upload build artifacts (visible on every run, 90-day retention) ───────
       - name: Upload build artifacts
@@ -133,6 +138,8 @@ jobs:
 
             | File | Purpose |
             |------|---------|
+            | `JLT-ZB-SoilMeasure.zigbee` | **Stable URL** – always the latest OTA image |
+            | `JLT-ZB-SoilMeasure.bin` | **Stable URL** – always the latest firmware binary |
             | `*.ino.bin` | Flash via USB with `arduino-cli upload` |
             | `*.ino.bootloader.bin` | Bootloader (needed for full erase-flash) |
             | `*.ino.partitions.bin` | Partition table |
@@ -155,5 +162,7 @@ jobs:
             build/${{ env.SKETCH }}.ino.bootloader.bin
             build/${{ env.SKETCH }}.ino.partitions.bin
             build/JLT-ZB-SoilMeasure_v${{ steps.ver.outputs.tag }}.zigbee
+            build/JLT-ZB-SoilMeasure.zigbee
+            build/JLT-ZB-SoilMeasure.bin
           draft: false
           prerelease: false
