@@ -76,7 +76,7 @@ def parse_version(ver_str: str) -> int:
 def build_ota_header(file_version: int, total_size: int) -> bytes:
     header_str = HEADER_STRING[:32].ljust(32, b'\x00')
     return struct.pack(
-        "<IHHHHHI32sI",
+        "<IHHHHHHI32sI",
         TAG_IDENTIFIER,
         HEADER_VERSION,
         HEADER_LENGTH,
