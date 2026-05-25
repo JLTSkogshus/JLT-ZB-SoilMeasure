@@ -78,6 +78,9 @@ static ZigbeeSoilSensor* const zbSoils[NUM_SENSORS] = {
   &zbSoil0, &zbSoil1, &zbSoil2
 };
 
+// Endpoint 4 – onboard user LED (active low: LOW = on, HIGH = off)
+static ZigbeeLight zbLed(4);
+
 // =============================================================================
 // Forward declarations
 // =============================================================================
@@ -86,6 +89,7 @@ static uint16_t readBatteryMillivolts();
 static uint8_t  readBatteryPercent();
 static void     reportAllSensors();
 static void     enterDeepSleep(uint32_t seconds);
+static void     onLedChange(bool state);
 
 // =============================================================================
 // OTA state
@@ -108,6 +112,10 @@ void setup() {
 
   Serial.printf("\n=== JLT ZB-SoilMeasure  boot #%lu ===\n", (unsigned long)s_bootCount);
 
+  // ── User LED ─────────────────────────────────────────────────────────────────
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);  // off initially (active low)
+
   // ── Initialise ADC backends (onboard + ADS1115 over I2C) ────────────────────────
   adcReaderBegin();
 
@@ -123,6 +131,10 @@ void setup() {
     zbSoils[i]->setPowerSource(ZB_POWER_SOURCE_BATTERY, readBatteryPercent());
     Zigbee.addEndpoint(zbSoils[i]);
   }
+  // LED endpoint (4) – standard on/off light, controlled by coordinator
+  zbLed.setManufacturerAndModel(ZIGBEE_MANUFACTURER, ZIGBEE_MODEL);
+  zbLed.onLightChange(onLedChange);
+  Zigbee.addEndpoint(&zbLed);
 
   // ── Start Zigbee stack as End Device ────────────────────────────────────────
   esp_zb_cfg_t zbConfig = ZIGBEE_DEFAULT_ED_CONFIG();
@@ -215,6 +227,16 @@ void setup() {
 
 // loop() is never reached – device always sleeps at end of setup()
 void loop() {}
+
+// =============================================================================
+// onLedChange()
+// Called by ZigbeeLight when the coordinator sends an on/off command.
+// LED_BUILTIN (GPIO15) is active low on XIAO ESP32-C6.
+// =============================================================================
+static void onLedChange(bool state) {
+  digitalWrite(LED_BUILTIN, state ? LOW : HIGH);
+  Serial.printf("[LED] User LED %s\n", state ? "ON" : "OFF");
+}
 
 // =============================================================================
 // readMoisturePercent()

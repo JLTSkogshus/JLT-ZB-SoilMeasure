@@ -160,6 +160,30 @@ const tzCal = {
     },
 };
 
+// ─── fromZigbee: genOnOff → user_led (endpoint 4) ────────────────────────────
+const fzLed = {
+    cluster: 'genOnOff',
+    type: ['attributeReport', 'readResponse'],
+    convert(model, msg, publish, options, meta) {
+        if (msg.endpoint.ID === 4) {
+            return {user_led: msg.data['onOff'] ? 'ON' : 'OFF'};
+        }
+    },
+};
+
+// ─── toZigbee: user_led → genOnOff on/off command to endpoint 4 ──────────────
+const tzLed = {
+    key: ['user_led'],
+    convertSet: async (entity, key, value, meta) => {
+        const on = (value === 'ON' || value === true);
+        await meta.device.getEndpoint(4).command('genOnOff', on ? 'on' : 'off', {});
+        return {state: {user_led: on ? 'ON' : 'OFF'}};
+    },
+    convertGet: async (entity, key, meta) => {
+        await meta.device.getEndpoint(4).read('genOnOff', ['onOff']);
+    },
+};
+
 // ─── exposes ──────────────────────────────────────────────────────────────────
 function buildExposes() {
     const list = [
@@ -171,6 +195,8 @@ function buildExposes() {
             .withDescription('Deep-sleep interval in seconds (writable). Minimum 60 s. Takes effect on next wake-up.'),
         e.binary('sleep_enabled', ea.ALL, 'ON', 'OFF')
             .withDescription('Enable deep-sleep between readings. OFF = stay awake (development mode, default). ON = sleep between readings.'),
+        e.binary('user_led', ea.ALL, 'ON', 'OFF')
+            .withDescription('Onboard user LED (GPIO15, active low).'),
     ];
     for (let i = 1; i <= NUM_SENSORS; i++) {
         list.push(
@@ -190,7 +216,7 @@ function buildExposes() {
 }
 
 function endpointMap() {
-    const map = {};
+    const map = {user_led: 4};
     for (let i = 1; i <= NUM_SENSORS; i++) map[`sensor_${i}`] = i;
     return map;
 }
@@ -202,8 +228,8 @@ export default {
     model:       'ZB-SoilMeasure',
     vendor:      'JLT',
     description: 'Zigbee soil moisture sensor – 1 to 9 probes, ADS1115 + onboard ADC, battery powered, deep-sleep capable.',
-    fromZigbee:  [fzMoisture, battery, fzCal, fzFirmwareVersion],
-    toZigbee:    [tzCal],
+    fromZigbee:  [fzMoisture, battery, fzCal, fzFirmwareVersion, fzLed],
+    toZigbee:    [tzCal, tzLed],
     exposes:     buildExposes(),
     ota:         true,
     meta:        {multiEndpoint: true},
