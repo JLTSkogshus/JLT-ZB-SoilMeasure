@@ -82,6 +82,23 @@ const fzMoisture = {
     },
 };
 
+// ─── fromZigbee: OTA cluster → human-readable firmware_version ──────────────
+// Fires when z2m reads genOta attributes (on join and when checking for updates).
+// currentFileVersion encoding: 0xMMmmppbb → "MM.mm.pp"
+const fzFirmwareVersion = {
+    cluster: 'genOta',
+    type: ['attributeReport', 'readResponse'],
+    convert(model, msg, publish, options, meta) {
+        if (msg.data['currentFileVersion'] !== undefined) {
+            const v     = msg.data['currentFileVersion'] >>> 0;   // force uint32
+            const major = (v >>> 24) & 0xFF;
+            const minor = (v >>> 16) & 0xFF;
+            const patch = (v >>>  8) & 0xFF;
+            return { firmware_version: `${major}.${minor}.${patch}` };
+        }
+    },
+};
+
 // ─── fromZigbee: custom calibration cluster ───────────────────────────────────
 const fzCal = {
     cluster: CAL_CLUSTER_NAME,
@@ -137,6 +154,8 @@ const {presets: e, access: ea} = require('zigbee-herdsman-converters/lib/exposes
 function buildExposes() {
     const list = [
         e.battery(),
+        e.text('firmware_version', ea.STATE)
+            .withDescription('Installed firmware version (e.g. 1.0.0). Updated when device checks for OTA.'),
         e.numeric('sleep_duration', ea.ALL)
             .withUnit('s')
             .withDescription('Deep-sleep interval in seconds (writable). ' +
@@ -175,7 +194,7 @@ const definition = {
     vendor:      'JLT',
     description: 'Zigbee soil moisture sensor – 1 to 9 probes, ADS1115 + onboard ADC, ' +
                  'battery powered, deep-sleep capable.',
-    fromZigbee:  [fzMoisture, e.battery ? require('zigbee-herdsman-converters/converters/fromZigbee').battery : null, fzCal].filter(Boolean),
+    fromZigbee:  [fzMoisture, e.battery ? require('zigbee-herdsman-converters/converters/fromZigbee').battery : null, fzCal, fzFirmwareVersion].filter(Boolean),
     toZigbee:    [tzCal],
     exposes:     buildExposes(),
     ota:         true,

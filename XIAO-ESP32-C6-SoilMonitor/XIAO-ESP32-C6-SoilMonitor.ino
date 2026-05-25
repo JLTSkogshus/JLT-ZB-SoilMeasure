@@ -116,6 +116,7 @@ void setup() {
   zbSoil0.onOTAStateChange(onOtaState);
   for (int i = 0; i < NUM_SENSORS; i++) {
     zbSoils[i]->setManufacturerAndModel(ZIGBEE_MANUFACTURER, ZIGBEE_MODEL);
+    zbSoils[i]->setVersion((OTA_RUNNING_VERSION >> 24) & 0xFF);  // major version → Basic cluster AppVersion
     zbSoils[i]->setPowerSource(ZB_POWER_SOURCE_BATTERY, readBatteryPercent());
     Zigbee.addEndpoint(zbSoils[i]);
   }
