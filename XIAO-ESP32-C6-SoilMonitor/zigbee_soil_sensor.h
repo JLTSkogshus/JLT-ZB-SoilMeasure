@@ -21,11 +21,6 @@ public:
     ZigbeeSoilSensor(uint8_t endpoint, uint8_t sensorIdx);
     ~ZigbeeSoilSensor() {}
 
-    // Sets the Basic cluster SW Build ID string (0x4000), shown as
-    // "Firmware version" in the zigbee2mqtt About tab.
-    // Must be called before Zigbee.begin().
-    void setSoftwareBuildId(const char* id);
-
 protected:
     // Called by the Zigbee stack when the coordinator writes an attribute.
     // Handles writes to cluster 0xFC11 (dry / wet calibration).

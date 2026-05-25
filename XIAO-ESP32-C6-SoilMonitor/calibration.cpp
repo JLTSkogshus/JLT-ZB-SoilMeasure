@@ -53,3 +53,14 @@ void CalibrationManager::setSleepSeconds(uint32_t seconds) {
     _prefs.putUInt("sleep_sec", seconds);
     Serial.printf("[cal] Sleep duration updated to %lu s\n", (unsigned long)seconds);
 }
+
+bool CalibrationManager::getSleepEnabled() {
+    ensureInit();
+    return _prefs.getBool("sleep_en", false);  // default: awake mode
+}
+
+void CalibrationManager::setSleepEnabled(bool enabled) {
+    ensureInit();
+    _prefs.putBool("sleep_en", enabled);
+    Serial.printf("[cal] Sleep mode %s\n", enabled ? "ENABLED" : "DISABLED");
+}

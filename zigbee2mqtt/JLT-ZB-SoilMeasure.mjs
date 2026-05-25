@@ -53,12 +53,20 @@ try {
             calDry:        {ID: 0x0001, type: Zcl.DataType.UINT16},
             calWet:        {ID: 0x0002, type: Zcl.DataType.UINT16},
             sleepDuration: {ID: 0x0003, type: Zcl.DataType.UINT32},
+            sleepEnabled:  {ID: 0x0004, type: Zcl.DataType.UINT8},
         },
         commands:         {},
         commandsResponse: {},
     });
 } catch (_) {
-    // Cluster already registered (e.g. hot-reload)
+    // Cluster already registered (e.g. hot-reload) – patch in any missing attributes.
+    try {
+        const findFn = Zcl.Utils ? Zcl.Utils.findCluster : Zcl.findCluster;
+        const existing = findFn && findFn(CAL_CLUSTER_NAME);
+        if (existing && !existing.attributes.sleepEnabled) {
+            existing.attributes.sleepEnabled = {ID: 0x0004, type: Zcl.DataType.UINT8};
+        }
+    } catch (_2) { /* best-effort */ }
 }
 
 // ─── fromZigbee: Relative Humidity cluster → soil_moisture_sensor_N ──────────
@@ -100,6 +108,8 @@ const fzCal = {
         if (dry   !== undefined) result[`cal_dry_sensor_${ep}`] = dry;
         if (wet   !== undefined) result[`cal_wet_sensor_${ep}`] = wet;
         if (sleep !== undefined) result['sleep_duration']       = sleep;
+        const sleepEn = msg.data['sleepEnabled'] ?? msg.data[0x0004];
+        if (sleepEn !== undefined) result['sleep_enabled'] = sleepEn ? 'ON' : 'OFF';
         return result;
     },
 };
@@ -108,14 +118,26 @@ const fzCal = {
 const tzCal = {
     key: [
         'sleep_duration',
+        'sleep_enabled',
         ...Array.from({length: NUM_SENSORS}, (_, i) => `cal_dry_sensor_${i + 1}`),
         ...Array.from({length: NUM_SENSORS}, (_, i) => `cal_wet_sensor_${i + 1}`),
     ],
     convertSet: async (entity, key, value, meta) => {
+        // sleep_duration and sleep_enabled are device-wide (no withEndpoint) so
+        // entity may be the Device object rather than an Endpoint, which would
+        // cause UNSUPPORTED_CLUSTER. Always route them to endpoint 1 explicitly.
         if (key === 'sleep_duration') {
             const secs = Math.max(60, parseInt(value, 10));
-            await entity.write(CAL_CLUSTER_NAME, {sleepDuration: secs});
+            // Use numeric cluster/attr IDs to bypass z2m-herdsman's endpoint
+            // cluster-list guard (avoids UNSUPPORTED_CLUSTER if interview data
+            // is stale / incomplete).
+            await meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0003: {value: secs, type: Zcl.DataType.UINT32}});
             return {state: {sleep_duration: secs}};
+        }
+        if (key === 'sleep_enabled') {
+            const en = (value === 'ON' || value === true || value === 1) ? 1 : 0;
+            await meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0004: {value: en, type: Zcl.DataType.UINT8}});
+            return {state: {sleep_enabled: en ? 'ON' : 'OFF'}};
         }
         const m = key.match(/^cal_(dry|wet)_sensor_(\d+)$/);
         if (m) {
@@ -125,11 +147,16 @@ const tzCal = {
         }
     },
     convertGet: async (entity, key, meta) => {
-        const m    = key.match(/^cal_(dry|wet)_sensor_(\d+)$/);
-        const attr = key === 'sleep_duration' ? 'sleepDuration'
-                   : m  ? (m[1] === 'dry' ? 'calDry' : 'calWet')
-                   : null;
-        if (attr) await entity.read(CAL_CLUSTER_NAME, [attr]);
+        if (key === 'sleep_duration') {
+            // Numeric IDs bypass the cluster-list guard in z2m-herdsman.
+            await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0003]);
+        } else if (key === 'sleep_enabled') {
+            await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0004]);
+        } else {
+            const m    = key.match(/^cal_(dry|wet)_sensor_(\d+)$/);
+            const attr = m ? (m[1] === 'dry' ? 'calDry' : 'calWet') : null;
+            if (attr) await entity.read(CAL_CLUSTER_NAME, [attr]);
+        }
     },
 };
 
@@ -142,6 +169,8 @@ function buildExposes() {
         e.numeric('sleep_duration', ea.ALL)
             .withUnit('s')
             .withDescription('Deep-sleep interval in seconds (writable). Minimum 60 s. Takes effect on next wake-up.'),
+        e.binary('sleep_enabled', ea.ALL, 'ON', 'OFF')
+            .withDescription('Enable deep-sleep between readings. OFF = stay awake (development mode, default). ON = sleep between readings.'),
     ];
     for (let i = 1; i <= NUM_SENSORS; i++) {
         list.push(

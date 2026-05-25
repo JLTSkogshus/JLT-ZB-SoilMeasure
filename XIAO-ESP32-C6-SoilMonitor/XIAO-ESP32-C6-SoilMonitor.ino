@@ -53,6 +53,13 @@
 #include "zigbee_soil_sensor.h"  // ZigbeeSoilSensor (extends ZigbeeTempSensor)
 
 // =============================================================================
+// Increase the Arduino loop-task stack (default 8 KB overflows when 3+ Zigbee
+// endpoints + OTA client are active and reportHumidity() is called per sensor).
+// Override the weak symbol defined in cores/esp32/main.cpp.
+// =============================================================================
+size_t getArduinoLoopTaskStackSize(void) { return 16 * 1024; }
+
+// =============================================================================
 // RTC memory – persists across deep sleep
 // =============================================================================
 RTC_DATA_ATTR static uint32_t s_bootCount         = 0;   // total wake-ups
@@ -65,14 +72,10 @@ RTC_DATA_ATTR static uint32_t s_nextWakeupSec     = 0;   // seconds since power-
 // Relative Humidity (moisture %), and calibration cluster 0xFC11.
 // Only the first NUM_SENSORS endpoints are registered with the Zigbee stack.
 // =============================================================================
-static ZigbeeSoilSensor zbSoil0(1,0), zbSoil1(2,1), zbSoil2(3,2),
-                        zbSoil3(4,3), zbSoil4(5,4), zbSoil5(6,5),
-                        zbSoil6(7,6), zbSoil7(8,7), zbSoil8(9,8);
+static ZigbeeSoilSensor zbSoil0(1,0), zbSoil1(2,1), zbSoil2(3,2);
 
-static ZigbeeSoilSensor* const zbSoils[9] = {
-  &zbSoil0, &zbSoil1, &zbSoil2,
-  &zbSoil3, &zbSoil4, &zbSoil5,
-  &zbSoil6, &zbSoil7, &zbSoil8
+static ZigbeeSoilSensor* const zbSoils[NUM_SENSORS] = {
+  &zbSoil0, &zbSoil1, &zbSoil2
 };
 
 // =============================================================================
@@ -114,16 +117,9 @@ void setup() {
   // ── Configure Zigbee endpoints ──────────────────────────────────────────────  // OTA client lives on endpoint 1 (zbSoil0) – one per device is sufficient.
   zbSoil0.addOTAClient(OTA_RUNNING_VERSION, OTA_RUNNING_VERSION, OTA_HW_VERSION);
   zbSoil0.onOTAStateChange(onOtaState);
-  // Build version string from OTA_RUNNING_VERSION (0xMMmmppbb → "MM.mm.pp")
-  char s_verStr[10];
-  snprintf(s_verStr, sizeof(s_verStr), "%u.%u.%u",
-    (OTA_RUNNING_VERSION >> 24) & 0xFFu,
-    (OTA_RUNNING_VERSION >> 16) & 0xFFu,
-    (OTA_RUNNING_VERSION >>  8) & 0xFFu);
   for (int i = 0; i < NUM_SENSORS; i++) {
     zbSoils[i]->setManufacturerAndModel(ZIGBEE_MANUFACTURER, ZIGBEE_MODEL);
     zbSoils[i]->setVersion((OTA_RUNNING_VERSION >> 24) & 0xFF);  // AppVersion byte
-    zbSoils[i]->setSoftwareBuildId(s_verStr);                    // "1.0.0" → z2m About tab
     zbSoils[i]->setPowerSource(ZB_POWER_SOURCE_BATTERY, readBatteryPercent());
     Zigbee.addEndpoint(zbSoils[i]);
   }
@@ -137,8 +133,14 @@ void setup() {
   uint32_t joinStart = millis();
   while (!Zigbee.connected()) {
     if (millis() - joinStart > ZIGBEE_JOIN_TIMEOUT_MS) {
-      Serial.println("Join timed out – going back to sleep.");
-      enterDeepSleep(SLEEP_DURATION_SEC);
+      if (Calibration.getSleepEnabled()) {
+        Serial.println("Join timed out \u2013 going back to sleep.");
+        enterDeepSleep(Calibration.getSleepSeconds());
+      } else {
+        // Sleep disabled (dev mode) \u2013 keep retrying instead of sleeping.
+        Serial.println("Join timed out \u2013 retrying (sleep disabled).");
+        joinStart = millis();
+      }
     }
     delay(100);
   }
@@ -148,7 +150,16 @@ void setup() {
   s_lastConnectionSec = millis() / 1000;
 
   // ── Read and transmit sensor data ────────────────────────────────────────────
+  // Report immediately while the Zigbee stack is still idle.  Reporting BEFORE
+  // z2m starts its ZCL interview read phase avoids a concurrent-access crash
+  // inside the ESP32 Zigbee stack (heap corruption when an incoming cluster read
+  // races with an outgoing attribute report on the same endpoint).
   reportAllSensors();
+
+  // Give z2m 2 s to complete its ZDO/ZCL interview now that we are done
+  // transmitting.  The Zigbee task can process all incoming requests freely
+  // while the app task is blocked here (no lock contention).
+  delay(2000);
   // ── Check for OTA firmware update ────────────────────────────────
   // requestOTAUpdate() sends a Query Next Image Request to the coordinator.
   // The coordinator (zigbee2mqtt) will respond with image info if an update is
@@ -171,8 +182,34 @@ void setup() {
     ESP.restart();
   }
   Serial.println("[OTA] No update available.");
-  // ── Sleep ────────────────────────────────────────────────────────────────────
-  // Use NVS value so it can be changed over Zigbee (cluster 0xFC11 attr 0x0003).
+
+  // ── Sleep / Awake decision ───────────────────────────────────────────────────
+  // Sleep mode is controlled via cluster 0xFC11 attribute 0x0004 (sleep_enable).
+  // Default: DISABLED (stays awake for development).
+  // Set attr 0x0004 = 1 (or toggle the switch in z2m) to enable deep sleep.
+  Serial.printf("[sleep] Sleep mode: %s\n",
+                Calibration.getSleepEnabled() ? "ENABLED" : "DISABLED (awake loop)");
+
+  if (!Calibration.getSleepEnabled()) {
+    // Awake mode – report every sleep_duration seconds, never enter deep sleep.
+    // The Zigbee task continues running in the background, so attribute writes
+    // (e.g. toggling the sleep switch in z2m) are processed while we wait.
+    Serial.println("[sleep] Staying awake – reporting every sleep_duration s. "
+                   "Set attr 0x0004=1 on cluster 0xFC11 to enable sleep.");
+    for (;;) {
+      uint32_t interval_ms = (uint32_t)Calibration.getSleepSeconds() * 1000UL;
+      uint32_t t0 = millis();
+      while (millis() - t0 < interval_ms) delay(100);
+      reportAllSensors();
+      zbSoil0.requestOTAUpdate();
+      if (Calibration.getSleepEnabled()) {
+        Serial.println("[sleep] Sleep re-enabled – entering deep sleep.");
+        break;
+      }
+    }
+  }
+
+  // ── Deep sleep ────────────────────────────────────────────────────────────────
   enterDeepSleep(Calibration.getSleepSeconds());
 }
 
@@ -241,7 +278,7 @@ static void reportAllSensors() {
                   i + 1, moisture, cal.dryAdc, cal.wetAdc);
 
     zbSoils[i]->setHumidity(moisture);                           // moisture % → RH cluster
-    zbSoils[i]->setPowerSource(ZB_POWER_SOURCE_BATTERY, battPct); // battery % on each EP
+    zbSoils[i]->setBatteryPercentage(battPct);                   // update battery % attribute (safe at runtime)
     zbSoils[i]->reportHumidity();
   }
 }

@@ -22,9 +22,10 @@
 
 // ── Zigbee cluster / attribute IDs ────────────────────────────────────────────
 #define CAL_CLUSTER_ID   0xFC11u   // Manufacturer-specific calibration cluster
-#define CAL_ATTR_DRY     0x0001u   // uint16 R/W – ADC when sensor is dry
-#define CAL_ATTR_WET     0x0002u   // uint16 R/W – ADC when sensor is in water
-#define CAL_ATTR_SLEEP   0x0003u   // uint32 R/W – deep-sleep duration in seconds
+#define CAL_ATTR_DRY          0x0001u   // uint16 R/W – ADC when sensor is dry
+#define CAL_ATTR_WET          0x0002u   // uint16 R/W – ADC when sensor is in water
+#define CAL_ATTR_SLEEP        0x0003u   // uint32 R/W – deep-sleep duration in seconds
+#define CAL_ATTR_SLEEP_ENABLE 0x0004u   // uint8  R/W – 1 = deep-sleep on, 0 = stay awake (default)
 
 struct SensorCalibration {
     uint16_t dryAdc;   // ADC reading in dry air  → 0% moisture
@@ -49,6 +50,11 @@ public:
     // Read / write device-wide deep-sleep interval (seconds, default SLEEP_DURATION_SEC).
     uint32_t getSleepSeconds();
     void     setSleepSeconds(uint32_t seconds);
+
+    // Read / write sleep-mode enable flag (default: false = stay awake).
+    // Write 1 (true) to enable deep-sleep between readings.
+    bool getSleepEnabled();
+    void setSleepEnabled(bool enabled);
 
 private:
     Preferences _prefs;

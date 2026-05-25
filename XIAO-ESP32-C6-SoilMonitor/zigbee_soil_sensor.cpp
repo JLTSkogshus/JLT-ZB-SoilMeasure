@@ -1,27 +1,13 @@
 #include "zigbee_soil_sensor.h"
 #include "calibration.h"
 #include "config.h"
-#include <zcl/esp_zigbee_zcl_basic.h>   // ESP_ZB_ZCL_ATTR_BASIC_SW_BUILD_ID
 
 // Static per-sensor attribute storage – pointers passed to ZCL must remain valid
 // for the lifetime of the endpoint (i.e. forever for global objects).
 static uint16_t s_calDry[9];
 static uint16_t s_calWet[9];
-static uint32_t s_sleepSec;   // device-wide, shared by all endpoint instances
-
-// =============================================================================
-// setSoftwareBuildId() – writes the ZCL character string to Basic cluster 0x4000
-// =============================================================================
-void ZigbeeSoilSensor::setSoftwareBuildId(const char* id) {
-    uint8_t len = (uint8_t)strnlen(id, 16);
-    uint8_t zcl_str[17] = {};   // ZCL char string: length byte + up to 16 chars
-    zcl_str[0] = len;
-    memcpy(zcl_str + 1, id, len);
-    esp_zb_attribute_list_t *basic_cluster = esp_zb_cluster_list_get_cluster(
-        _cluster_list, ESP_ZB_ZCL_CLUSTER_ID_BASIC, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
-    if (basic_cluster == nullptr) return;
-    esp_zb_basic_cluster_add_attr(basic_cluster, ESP_ZB_ZCL_ATTR_BASIC_SW_BUILD_ID, zcl_str);
-}
+static uint32_t s_sleepSec;      // device-wide sleep duration (seconds)
+static uint8_t  s_sleepEnabled;  // device-wide: 0 = awake mode, 1 = deep-sleep mode
 
 // =============================================================================
 // Constructor
@@ -45,7 +31,8 @@ void ZigbeeSoilSensor::_addCalibrationCluster() {
     // Store initial values in static arrays – ZCL holds a pointer to these.
     s_calDry[_sensorIdx] = cal.dryAdc;
     s_calWet[_sensorIdx] = cal.wetAdc;
-    s_sleepSec           = Calibration.getSleepSeconds();
+    s_sleepSec     = Calibration.getSleepSeconds();
+    s_sleepEnabled = Calibration.getSleepEnabled() ? 1u : 0u;
 
     esp_zb_attribute_list_t *attrs = esp_zb_zcl_attr_list_create(CAL_CLUSTER_ID);
 
@@ -66,6 +53,12 @@ void ZigbeeSoilSensor::_addCalibrationCluster() {
         ESP_ZB_ZCL_ATTR_TYPE_U32,
         ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE,
         &s_sleepSec);
+
+    esp_zb_custom_cluster_add_custom_attr(
+        attrs, CAL_ATTR_SLEEP_ENABLE,
+        ESP_ZB_ZCL_ATTR_TYPE_U8,
+        ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE,
+        &s_sleepEnabled);
 
     esp_zb_cluster_list_add_custom_cluster(
         _cluster_list, attrs,
@@ -97,6 +90,12 @@ void ZigbeeSoilSensor::zbAttributeSet(const esp_zb_zcl_set_attr_value_message_t 
                 Calibration.setSleepSeconds(secs);
             }
             return;   // not a calibration attribute – skip Calibration.set() below
+        }
+        case CAL_ATTR_SLEEP_ENABLE: {
+            uint8_t en = *reinterpret_cast<const uint8_t *>(message->attribute.data.value);
+            s_sleepEnabled = en;
+            Calibration.setSleepEnabled(en != 0);
+            return;
         }
         default:
             return;
