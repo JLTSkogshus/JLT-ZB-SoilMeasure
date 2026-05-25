@@ -200,6 +200,10 @@ const definition = {
     ota:         true,
     meta:        {multiEndpoint: true},
     endpoint:    () => endpointMap(),
+    // Sleepy end device – it pushes all data on wake-up.
+    // An empty configure prevents z2m from attempting cluster binds
+    // (which time out because the device is in deep sleep most of the time).
+    configure:   async () => {},
 };
 
 module.exports = definition;
