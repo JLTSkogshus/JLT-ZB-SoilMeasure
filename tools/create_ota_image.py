@@ -51,13 +51,15 @@ import os
 import re
 
 # ── Constants matching addOTAClient() defaults in ZigbeeEP.h ─────────────────
-MANUFACTURER_CODE = 0x1001
-IMAGE_TYPE        = 0x1011
-TAG_IDENTIFIER    = 0x0BEEF11E
-HEADER_VERSION    = 0x0100
-ZIGBEE_STACK_VER  = 0x0002
-HEADER_LENGTH     = 56
-HEADER_STRING     = b"JLT ZB-SoilMeasure"   # max 32 bytes
+MANUFACTURER_CODE        = 0x1001
+IMAGE_TYPE               = 0x1011
+TAG_IDENTIFIER           = 0x0BEEF11E
+HEADER_VERSION           = 0x0100
+ZIGBEE_STACK_VER         = 0x0002
+HEADER_LENGTH            = 56
+HEADER_STRING            = b"JLT ZB-SoilMeasure"   # max 32 bytes
+SUBELEMENT_UPGRADE_IMAGE = 0x0000  # ZCL OTA spec §11.4.2 – Upgrade Image tag
+SUBELEMENT_HEADER_SIZE   = 6       # 2 (tag) + 4 (length)
 
 
 def parse_version(ver_str: str) -> int:
@@ -113,7 +115,11 @@ def main():
     with open(bin_path, "rb") as f:
         binary = f.read()
 
-    total_size = HEADER_LENGTH + len(binary)
+    # Wrap payload in an Upgrade Image subelement (ZCL OTA spec §11.4.2).
+    # Without this wrapper the Espressif OTA client rejects the image as INVALID_IMAGE.
+    subelement = struct.pack("<HI", SUBELEMENT_UPGRADE_IMAGE, len(binary)) + binary
+
+    total_size = HEADER_LENGTH + len(subelement)
     header     = build_ota_header(file_version, total_size)
     assert len(header) == HEADER_LENGTH, f"Header is {len(header)} bytes, expected {HEADER_LENGTH}"
 
@@ -123,7 +129,7 @@ def main():
 
     with open(out_path, "wb") as f:
         f.write(header)
-        f.write(binary)
+        f.write(subelement)
 
     print(f"OTA image created:")
     print(f"  Input  : {bin_path}  ({len(binary):,} bytes)")
