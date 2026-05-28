@@ -84,7 +84,6 @@ static ZigbeeLight zbLed(4);
 // =============================================================================
 // Forward declarations
 // =============================================================================
-static float    readMoisturePercent(uint8_t sensorIdx);
 static uint16_t readBatteryMillivolts();
 static uint8_t  readBatteryPercent();
 static void     reportAllSensors();
@@ -239,20 +238,6 @@ static void onLedChange(bool state) {
 }
 
 // =============================================================================
-// readMoisturePercent()
-// Returns 0.0–100.0 % for sensor at sensorIdx.
-// Reads via adcReadRaw() (onboard or ADS1115, normalised to 12-bit scale).
-// Calibration loaded from NVS; writable per-sensor over Zigbee cluster 0xFC11.
-// =============================================================================
-static float readMoisturePercent(uint8_t sensorIdx) {
-  SensorCalibration cal = Calibration.get(sensorIdx);
-  uint16_t raw     = adcReadRaw(sensorIdx);   // 0–4095, averaged, normalised
-  float moisture   = (cal.dryAdc - (float)raw) * 100.0f
-                     / (float)(cal.dryAdc - cal.wetAdc);
-  return constrain(moisture, 0.0f, 100.0f);
-}
-
-// =============================================================================
 // readBatteryMillivolts()
 // Reads the voltage-divided battery voltage and scales it back to Vbat in mV.
 // =============================================================================
@@ -294,13 +279,18 @@ static void reportAllSensors() {
                 (unsigned long)s_bootCount);
 
   for (int i = 0; i < NUM_SENSORS; i++) {
-    float moisture = readMoisturePercent(i);
+    uint16_t raw = adcReadRaw(i);            // averaged, normalised to 12-bit
     SensorCalibration cal = Calibration.get(i);
-    Serial.printf("Sensor %d : %.1f %%  [cal dry=%u wet=%u]\n",
-                  i + 1, moisture, cal.dryAdc, cal.wetAdc);
+    float moisture = constrain(
+        (cal.dryAdc - (float)raw) * 100.0f / (float)(cal.dryAdc - cal.wetAdc),
+        0.0f, 100.0f);
 
-    zbSoils[i]->setHumidity(moisture);                           // moisture % → RH cluster
-    zbSoils[i]->setBatteryPercentage(battPct);                   // update battery % attribute (safe at runtime)
+    Serial.printf("Sensor %d : %.1f %%  raw=%u  [cal dry=%u wet=%u]\n",
+                  i + 1, moisture, raw, cal.dryAdc, cal.wetAdc);
+
+    zbSoils[i]->setRawAdc(raw);              // expose raw ADC via cluster 0xFC11 attr 0x0005
+    zbSoils[i]->setHumidity(moisture);       // moisture % → RH cluster
+    zbSoils[i]->setBatteryPercentage(battPct);
     zbSoils[i]->reportHumidity();
   }
 }

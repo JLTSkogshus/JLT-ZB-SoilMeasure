@@ -26,6 +26,7 @@
 #define CAL_ATTR_WET          0x0002u   // uint16 R/W – ADC when sensor is in water
 #define CAL_ATTR_SLEEP        0x0003u   // uint32 R/W – deep-sleep duration in seconds
 #define CAL_ATTR_SLEEP_ENABLE 0x0004u   // uint8  R/W – 1 = deep-sleep on, 0 = stay awake (default)
+#define CAL_ATTR_RAW_ADC      0x0005u   // uint16 R   – last raw ADC reading (updated each report cycle)
 
 struct SensorCalibration {
     uint16_t dryAdc;   // ADC reading in dry air  → 0% moisture

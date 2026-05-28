@@ -22,8 +22,8 @@
 // ATTRIBUTES EXPOSED
 // ─────────────────────────────────────────────────────────────────────────────
 //  soil_moisture_sensor_N  (%)       – moisture reading per sensor (read)
-//  cal_dry_sensor_N                  – dry-air ADC value per sensor (read/write)
-//  cal_wet_sensor_N                  – in-water ADC value per sensor (read/write)
+//  cal_dry_sensor_N                  – dry-air ADC value per sensor (read)
+//  cal_wet_sensor_N                  – in-water ADC value per sensor (read)
 //  sleep_duration          (s)       – deep-sleep interval, device-wide (read/write)
 //  firmware_version                  – installed firmware (e.g. "1.0.0") (read)
 //  battery                 (%)       – battery level (read)
@@ -54,6 +54,7 @@ try {
             calWet:        {ID: 0x0002, type: Zcl.DataType.UINT16},
             sleepDuration: {ID: 0x0003, type: Zcl.DataType.UINT32},
             sleepEnabled:  {ID: 0x0004, type: Zcl.DataType.UINT8},
+            rawAdc:        {ID: 0x0005, type: Zcl.DataType.UINT16},
         },
         commands:         {},
         commandsResponse: {},
@@ -63,8 +64,11 @@ try {
     try {
         const findFn = Zcl.Utils ? Zcl.Utils.findCluster : Zcl.findCluster;
         const existing = findFn && findFn(CAL_CLUSTER_NAME);
-        if (existing && !existing.attributes.sleepEnabled) {
-            existing.attributes.sleepEnabled = {ID: 0x0004, type: Zcl.DataType.UINT8};
+        if (existing) {
+            if (!existing.attributes.sleepEnabled)
+                existing.attributes.sleepEnabled = {ID: 0x0004, type: Zcl.DataType.UINT8};
+            if (!existing.attributes.rawAdc)
+                existing.attributes.rawAdc = {ID: 0x0005, type: Zcl.DataType.UINT16};
         }
     } catch (_2) { /* best-effort */ }
 }
@@ -116,6 +120,8 @@ const fzCal = {
         if (sleep !== undefined) result['sleep_duration']       = sleep;
         const sleepEn = msg.data['sleepEnabled'] ?? msg.data[0x0004];
         if (sleepEn !== undefined) result['sleep_enabled'] = sleepEn ? 'ON' : 'OFF';
+        const rawAdc = msg.data['rawAdc'] ?? msg.data[0x0005];
+        if (rawAdc !== undefined) result[`raw_adc_sensor_${ep}`] = rawAdc;
         return result;
     },
 };
@@ -125,8 +131,6 @@ const tzCal = {
     key: [
         'sleep_duration',
         'sleep_enabled',
-        ...Array.from({length: NUM_SENSORS}, (_, i) => `cal_dry_sensor_${i + 1}`),
-        ...Array.from({length: NUM_SENSORS}, (_, i) => `cal_wet_sensor_${i + 1}`),
     ],
     convertSet: async (entity, key, value, meta) => {
         // sleep_duration and sleep_enabled are device-wide (no withEndpoint) so
@@ -145,12 +149,6 @@ const tzCal = {
             await meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0004: {value: en, type: Zcl.DataType.UINT8}});
             return {state: {sleep_enabled: en ? 'ON' : 'OFF'}};
         }
-        const m = key.match(/^cal_(dry|wet)_sensor_(\d+)$/);
-        if (m) {
-            const attr = m[1] === 'dry' ? 'calDry' : 'calWet';
-            await entity.write(CAL_CLUSTER_NAME, {[attr]: parseInt(value, 10)});
-            return {state: {[key]: parseInt(value, 10)}};
-        }
     },
     convertGet: async (entity, key, meta) => {
         if (key === 'sleep_duration') {
@@ -158,10 +156,6 @@ const tzCal = {
             await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0003]);
         } else if (key === 'sleep_enabled') {
             await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0004]);
-        } else {
-            const m    = key.match(/^cal_(dry|wet)_sensor_(\d+)$/);
-            const attr = m ? (m[1] === 'dry' ? 'calDry' : 'calWet') : null;
-            if (attr) await entity.read(CAL_CLUSTER_NAME, [attr]);
         }
     },
 };
@@ -210,11 +204,14 @@ function buildExposes() {
                 .withUnit('%')
                 .withDescription(`Sensor ${i} soil moisture`)
                 .withEndpoint(`sensor_${i}`),
-            e.numeric('cal_dry', ea.ALL)
-                .withDescription(`Sensor ${i}: ADC value in dry air (→ 0 %). Place sensor in air and write the raw ADC shown on serial.`)
+            e.numeric('raw_adc', ea.STATE)
+                .withDescription(`Sensor ${i} last raw ADC reading (0–4095). Updated each reporting cycle.`)
                 .withEndpoint(`sensor_${i}`),
-            e.numeric('cal_wet', ea.ALL)
-                .withDescription(`Sensor ${i}: ADC value submerged in water (→ 100 %). Place sensor in water and write the raw ADC shown on serial.`)
+            e.numeric('cal_dry', ea.STATE)
+                .withDescription(`Sensor ${i}: ADC value in dry air (→ 0 %).`)
+                .withEndpoint(`sensor_${i}`),
+            e.numeric('cal_wet', ea.STATE)
+                .withDescription(`Sensor ${i}: ADC value submerged in water (→ 100 %).`)
                 .withEndpoint(`sensor_${i}`),
         );
     }

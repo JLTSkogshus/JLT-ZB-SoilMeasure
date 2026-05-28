@@ -21,6 +21,9 @@ public:
     ZigbeeSoilSensor(uint8_t endpoint, uint8_t sensorIdx);
     ~ZigbeeSoilSensor() {}
 
+    // Update the read-only rawAdc attribute (call from reportAllSensors each cycle).
+    void setRawAdc(uint16_t raw);
+
 protected:
     // Called by the Zigbee stack when the coordinator writes an attribute.
     // Handles writes to cluster 0xFC11 (dry / wet calibration).

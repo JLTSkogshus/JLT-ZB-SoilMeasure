@@ -63,6 +63,7 @@ const CAL_CLUSTER_NAME = 'jltSoilCal';
                 calDry:        {ID: 0x0001, type: Zcl.DataType.UINT16},
                 calWet:        {ID: 0x0002, type: Zcl.DataType.UINT16},
                 sleepDuration: {ID: 0x0003, type: Zcl.DataType.UINT32},
+                rawAdc:        {ID: 0x0005, type: Zcl.DataType.UINT16},
             },
             commands:         {},
             commandsResponse: {},
@@ -113,6 +114,8 @@ const fzCal = {
         if (dry   !== undefined) result[`cal_dry_sensor_${ep}`]  = dry;
         if (wet   !== undefined) result[`cal_wet_sensor_${ep}`]  = wet;
         if (sleep !== undefined) result['sleep_duration']        = sleep;
+        const rawAdc = msg.data['rawAdc'] ?? msg.data[0x0005];
+        if (rawAdc !== undefined) result[`raw_adc_sensor_${ep}`] = rawAdc;
         return result;
     },
 };
@@ -123,10 +126,37 @@ const fzCal = {
 const tzCal = {
     key: [
         'sleep_duration',
+        'calibration_target',
+        'capture_dry',
+        'capture_wet',
         ...Array.from({length: NUM_SENSORS}, (_, i) => `cal_dry_sensor_${i + 1}`),
         ...Array.from({length: NUM_SENSORS}, (_, i) => `cal_wet_sensor_${i + 1}`),
     ],
     convertSet: async (entity, key, value, meta) => {
+        // ── Calibration target (dropdown) – state only, no device write ───
+        if (key === 'calibration_target') {
+            return {state: {calibration_target: value}};
+        }
+        // ── Capture dry / wet calibration point ────────────────────────────
+        // Reads the raw ADC from attr 0x0005 of the selected endpoint, then
+        // writes it as the dry (0x0001) or wet (0x0002) calibration value.
+        // The device must be awake (sleep disabled) for the read to succeed.
+        if (key === 'capture_dry' || key === 'capture_wet') {
+            if (value !== 'ON' && value !== true) return {state: {[key]: 'OFF'}};
+            const target = meta.state.calibration_target || 'sensor_1';
+            const epId   = parseInt(target.replace('sensor_', ''), 10);
+            if (isNaN(epId) || epId < 1 || epId > NUM_SENSORS)
+                throw new Error(`Invalid calibration_target: ${target}`);
+            const ep = meta.device.getEndpoint(epId);
+            const res    = await ep.read(CAL_CLUSTER_CODE, [0x0005]);
+            const rawAdc = res[0x0005] ?? res['rawAdc'];
+            if (rawAdc === undefined)
+                throw new Error('Could not read rawAdc – ensure device is awake (sleep disabled).');
+            const isDry = key === 'capture_dry';
+            await ep.write(CAL_CLUSTER_NAME, {[isDry ? 'calDry' : 'calWet']: rawAdc});
+            const calKey = `cal_${isDry ? 'dry' : 'wet'}_sensor_${epId}`;
+            return {state: {[key]: 'OFF', [calKey]: rawAdc}};
+        }
         if (key === 'sleep_duration') {
             const secs = Math.max(60, parseInt(value, 10));   // enforce 60 s minimum
             await entity.write(CAL_CLUSTER_NAME, {sleepDuration: secs});
@@ -160,12 +190,23 @@ function buildExposes() {
             .withUnit('s')
             .withDescription('Deep-sleep interval in seconds (writable). ' +
                              'Minimum 60 s. Takes effect on next wake-up.'),
+        // ── Calibration UI ──────────────────────────────────────────────────────
+        e.enum('calibration_target', ea.STATE_SET,
+               Array.from({length: NUM_SENSORS}, (_, i) => `sensor_${i + 1}`))
+            .withDescription('Select which sensor to calibrate, then use the Capture buttons below.'),
+        e.binary('capture_dry', ea.SET, 'ON', 'OFF')
+            .withDescription('Place the selected sensor in dry air, then press to capture the dry calibration point (0 %). Device must be awake.'),
+        e.binary('capture_wet', ea.SET, 'ON', 'OFF')
+            .withDescription('Place the selected sensor in water, then press to capture the wet calibration point (100 %). Device must be awake.'),
     ];
     for (let i = 1; i <= NUM_SENSORS; i++) {
         list.push(
             e.numeric(`soil_moisture`, ea.STATE)
                 .withUnit('%')
                 .withDescription(`Sensor ${i} soil moisture`)
+                .withEndpoint(`sensor_${i}`),
+            e.numeric('raw_adc', ea.STATE)
+                .withDescription(`Sensor ${i} last raw ADC reading (0–4095). Updated each reporting cycle.`)
                 .withEndpoint(`sensor_${i}`),
             e.numeric(`cal_dry`, ea.ALL)
                 .withDescription(`Sensor ${i}: ADC value in dry air (→ 0 %). ` +

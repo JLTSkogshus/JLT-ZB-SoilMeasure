@@ -6,8 +6,9 @@
 // for the lifetime of the endpoint (i.e. forever for global objects).
 static uint16_t s_calDry[9];
 static uint16_t s_calWet[9];
-static uint32_t s_sleepSec;      // device-wide sleep duration (seconds)
-static uint8_t  s_sleepEnabled;  // device-wide: 0 = awake mode, 1 = deep-sleep mode
+static uint16_t s_rawAdc[9]      = {};  // last raw ADC reading per sensor (read-only attribute)
+static uint32_t s_sleepSec;            // device-wide sleep duration (seconds)
+static uint8_t  s_sleepEnabled;        // device-wide: 0 = awake mode, 1 = deep-sleep mode
 
 // =============================================================================
 // Constructor
@@ -60,6 +61,12 @@ void ZigbeeSoilSensor::_addCalibrationCluster() {
         ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE,
         &s_sleepEnabled);
 
+    esp_zb_custom_cluster_add_custom_attr(
+        attrs, CAL_ATTR_RAW_ADC,
+        ESP_ZB_ZCL_ATTR_TYPE_U16,
+        ESP_ZB_ZCL_ATTR_ACCESS_READ_ONLY,
+        &s_rawAdc[_sensorIdx]);
+
     esp_zb_cluster_list_add_custom_cluster(
         _cluster_list, attrs,
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
@@ -101,4 +108,13 @@ void ZigbeeSoilSensor::zbAttributeSet(const esp_zb_zcl_set_attr_value_message_t 
             return;
     }
     Calibration.set(_sensorIdx, cal);
+}
+
+// =============================================================================
+// setRawAdc()
+// Stores the latest raw ADC reading into the ZCL attribute table so the
+// coordinator can read it on demand (e.g. when user presses Capture Dry/Wet).
+// =============================================================================
+void ZigbeeSoilSensor::setRawAdc(uint16_t raw) {
+    s_rawAdc[_sensorIdx] = raw;
 }
