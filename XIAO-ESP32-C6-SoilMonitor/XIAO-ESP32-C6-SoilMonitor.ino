@@ -131,7 +131,9 @@ void setup() {
   for (int i = 0; i < NUM_SENSORS; i++) {
     zbSoils[i]->setManufacturerAndModel(ZIGBEE_MANUFACTURER, ZIGBEE_MODEL);
     zbSoils[i]->setVersion((OTA_RUNNING_VERSION >> 24) & 0xFF);  // AppVersion byte
-    zbSoils[i]->setPowerSource(ZB_POWER_SOURCE_BATTERY, readBatteryPercent());
+    // Seed battery % and voltage (genPowerCfg). Voltage is in 100 mV units.
+    zbSoils[i]->setPowerSource(ZB_POWER_SOURCE_BATTERY, readBatteryPercent(),
+                              (uint8_t)(readBatteryMillivolts() / 100));
     Zigbee.addEndpoint(zbSoils[i]);
   }
   // LED endpoint (4) – standard on/off light, controlled by coordinator
@@ -260,7 +262,7 @@ static uint16_t readBatteryMillivolts() {
     delay(2);
   }
   uint32_t vmeasMv = sum / ADC_SAMPLES;
-  return (uint16_t)(vmeasMv * BATTERY_DIVIDER_RATIO * BATTERY_CALIBRATION);
+  return (uint16_t)(vmeasMv * BATTERY_DIVIDER_RATIO);
 }
 
 // =============================================================================
@@ -302,6 +304,7 @@ static void reportAllSensors() {
     zbSoils[i]->setRawAdc(raw);              // expose raw ADC via cluster 0xFC11 attr 0x0005
     zbSoils[i]->setHumidity(moisture);       // moisture % → RH cluster
     zbSoils[i]->setBatteryPercentage(battPct);
+    zbSoils[i]->setBatteryVoltage((uint8_t)(battMv / 100));  // genPowerCfg voltage (100 mV units)
     zbSoils[i]->reportHumidity();
     zbSoils[i]->reportRawAdc();              // report raw ADC via cluster 0xFC11 attr 0x0005
   }

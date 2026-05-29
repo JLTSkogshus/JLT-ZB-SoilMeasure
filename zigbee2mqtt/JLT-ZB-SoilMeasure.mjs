@@ -27,6 +27,7 @@
 //  sleep_duration          (s)       – deep-sleep interval, device-wide (read/write)
 //  firmware_version                  – installed firmware (e.g. "1.0.0") (read)
 //  battery                 (%)       – battery level (read)
+//  voltage                 (mV)      – battery voltage, 100 mV resolution (read)
 //
 // NUM_SENSORS  ← must match the value in your firmware config.h
 // =============================================================================
@@ -71,6 +72,12 @@ const fzMoisture = {
         // endpoint.  The readResponse is handled by fzCal and updates raw_adc_sensor_N.
         // This avoids needing a separate ZCL binding for the custom cluster.
         msg.endpoint.read(CAL_CLUSTER_CODE, [0x0005]).catch(() => {});
+        // Battery voltage (genPowerCfg) is not a reportable attribute, so refresh
+        // it from endpoint 1 each cycle.  The readResponse is handled by the
+        // standard `battery` converter and updates the `voltage` expose.
+        if (msg.endpoint.ID === 1) {
+            msg.endpoint.read('genPowerCfg', ['batteryVoltage']).catch(() => {});
+        }
         return {[`soil_moisture_sensor_${msg.endpoint.ID}`]: pct};
     },
 };
@@ -224,6 +231,9 @@ const tzLed = {
 function buildExposes() {
     const list = [
         e.battery(),
+        e.numeric('voltage', ea.STATE)
+            .withUnit('mV')
+            .withDescription('Battery voltage (100 mV resolution).'),
         e.text('firmware_version', ea.STATE)
             .withDescription('Installed firmware version (e.g. 1.0.0). Updated when device checks for OTA.'),
         e.numeric('sleep_duration', ea.ALL)
@@ -310,6 +320,8 @@ export default {
         }
         // Read firmware version from the OTA upgrade cluster.
         try { await device.getEndpoint(1).read('genOta', ['currentFileVersion']); } catch (_) {}
+        // Read battery percentage + voltage (genPowerCfg) so battery / voltage populate.
+        try { await device.getEndpoint(1).read('genPowerCfg', ['batteryPercentageRemaining', 'batteryVoltage']); } catch (_) {}
         // Read the user LED on/off state (endpoint 4) so user_led populates.
         try { await device.getEndpoint(4).read('genOnOff', ['onOff']); } catch (_) {}
     },
