@@ -23,6 +23,13 @@ public:
 
     // Update the read-only rawAdc attribute (call from reportAllSensors each cycle).
     void setRawAdc(uint16_t raw);
+    // Send a ZCL attribute report for rawAdc directly to the coordinator.
+    bool reportRawAdc();
+    // Re-read calibration / sleep values from NVS and refresh the ZCL backing
+    // stores.  Call once in setup() after Calibration.begin(), before
+    // Zigbee.begin(), so the ZCL attributes reflect the correct stored values
+    // regardless of whether NVS was ready during the static constructor.
+    void updateCalFromNvs();
 
 protected:
     // Called by the Zigbee stack when the coordinator writes an attribute.
@@ -33,6 +40,8 @@ private:
 
     uint8_t _sensorIdx;
     void    _addCalibrationCluster();
+    // Report a single 0xFC11 attribute to the coordinator via direct addressing.
+    bool    _reportCustomAttr(uint16_t attrId);
 };
 
 // App-task helpers to consume the report-now flag set by the Zigbee callback.

@@ -45,8 +45,8 @@ static const SensorAdcConfig SENSOR_ADC_CONFIG[10] = {
 // write cluster 0xFC11, attribute 0x0001 (dry) or 0x0002 (wet) on each endpoint.
 // Values are persisted per-sensor in NVS and survive power cycles.
 // See calibration.h for details.
-#define CAL_DRY_DEFAULT  3200    // Factory fallback: ADC in dry air  →  0%
-#define CAL_WET_DEFAULT  1400    // Factory fallback: ADC in water    → 100%
+#define CAL_DRY_DEFAULT  2200    // Factory fallback: ADC in dry air  →  0%  (3.3 V supply)
+#define CAL_WET_DEFAULT   900    // Factory fallback: ADC in water    → 100%  (3.3 V supply)
 
 // ── Battery Monitoring ────────────────────────────────────────────────────────
 // IMPORTANT: Do NOT connect the 4.2 V battery directly to an ADC pin.

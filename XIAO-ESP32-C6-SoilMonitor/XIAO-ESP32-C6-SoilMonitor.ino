@@ -120,6 +120,10 @@ void setup() {
 
   // ── Open NVS calibration store ───────────────────────────────────────────────
   Calibration.begin();
+  // Refresh ZCL attribute backing stores from NVS now that the store is open.
+  // The static constructors may have run before NVS was ready, leaving the
+  // ZCL attributes at their zero-initialised values.
+  for (int i = 0; i < NUM_SENSORS; i++) zbSoils[i]->updateCalFromNvs();
 
   // ── Configure Zigbee endpoints ──────────────────────────────────────────────  // OTA client lives on endpoint 1 (zbSoil0) – one per device is sufficient.
   zbSoil0.addOTAClient(OTA_RUNNING_VERSION, OTA_RUNNING_VERSION, OTA_HW_VERSION);
@@ -299,6 +303,7 @@ static void reportAllSensors() {
     zbSoils[i]->setHumidity(moisture);       // moisture % → RH cluster
     zbSoils[i]->setBatteryPercentage(battPct);
     zbSoils[i]->reportHumidity();
+    zbSoils[i]->reportRawAdc();              // report raw ADC via cluster 0xFC11 attr 0x0005
   }
 }
 

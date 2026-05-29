@@ -34,47 +34,32 @@
 import {Zcl}         from 'zigbee-herdsman';
 import {battery}     from 'zigbee-herdsman-converters/converters/fromZigbee';
 import {presets as e, access as ea} from 'zigbee-herdsman-converters/lib/exposes';
+import {deviceAddCustomCluster}     from 'zigbee-herdsman-converters/lib/modernExtend';
 
 const NUM_SENSORS = 2;   // ← change this to match NUM_SENSORS in config.h
 
-// ─── Cluster constants ────────────────────────────────────────────────────────
+// ─── Cluster constants ─────────────────────────────────────────────
 const CAL_CLUSTER_CODE = 0xFC11;
 const CAL_CLUSTER_NAME = 'jltSoilCal';
 
-// ─── Register the manufacturer-specific cluster with zigbee-herdsman ─────────
-try {
-    const addFn = (Zcl.Utils && Zcl.Utils.addCluster)
-                ? (def) => Zcl.Utils.addCluster(def)
-                : (def) => Zcl.addCluster(def);
-    addFn({
-        name: CAL_CLUSTER_NAME,
-        code: CAL_CLUSTER_CODE,
-        attributes: {
-            calDry:        {ID: 0x0001, type: Zcl.DataType.UINT16},
-            calWet:        {ID: 0x0002, type: Zcl.DataType.UINT16},
-            sleepDuration: {ID: 0x0003, type: Zcl.DataType.UINT32},
-            sleepEnabled:  {ID: 0x0004, type: Zcl.DataType.UINT8},
-            rawAdc:        {ID: 0x0005, type: Zcl.DataType.UINT16},
-            reportNow:     {ID: 0x0006, type: Zcl.DataType.UINT8},
-        },
-        commands:         {},
-        commandsResponse: {},
-    });
-} catch (_) {
-    // Cluster already registered (e.g. hot-reload) – patch in any missing attributes.
-    try {
-        const findFn = Zcl.Utils ? Zcl.Utils.findCluster : Zcl.findCluster;
-        const existing = findFn && findFn(CAL_CLUSTER_NAME);
-        if (existing) {
-            if (!existing.attributes.sleepEnabled)
-                existing.attributes.sleepEnabled = {ID: 0x0004, type: Zcl.DataType.UINT8};
-            if (!existing.attributes.rawAdc)
-                existing.attributes.rawAdc = {ID: 0x0005, type: Zcl.DataType.UINT8};
-            if (!existing.attributes.reportNow)
-                existing.attributes.reportNow = {ID: 0x0006, type: Zcl.DataType.UINT8};
-        }
-    } catch (_2) { /* best-effort */ }
-}
+// Shared cluster definition for deviceAddCustomCluster().  zigbee-herdsman and
+// the z2m frontend require a `name` on the cluster AND on every attribute;
+// omitting them makes the frontend's ClusterSinglePicker crash on
+// `null.localeCompare(...)` when sorting cluster names.
+const CAL_CLUSTER_DEF = {
+    name: CAL_CLUSTER_NAME,
+    ID: CAL_CLUSTER_CODE,
+    attributes: {
+        calDry:        {name: 'calDry',        ID: 0x0001, type: Zcl.DataType.UINT16},
+        calWet:        {name: 'calWet',        ID: 0x0002, type: Zcl.DataType.UINT16},
+        sleepDuration: {name: 'sleepDuration', ID: 0x0003, type: Zcl.DataType.UINT32},
+        sleepEnabled:  {name: 'sleepEnabled',  ID: 0x0004, type: Zcl.DataType.UINT8},
+        rawAdc:        {name: 'rawAdc',        ID: 0x0005, type: Zcl.DataType.UINT16},
+        reportNow:     {name: 'reportNow',     ID: 0x0006, type: Zcl.DataType.UINT8},
+    },
+    commands:         {},
+    commandsResponse: {},
+};
 
 // ─── fromZigbee: Relative Humidity cluster → soil_moisture_sensor_N ──────────
 const fzMoisture = {
@@ -82,6 +67,10 @@ const fzMoisture = {
     type: ['attributeReport', 'readResponse'],
     convert(model, msg, publish, options, meta) {
         const pct = parseFloat(msg.data['measuredValue']) / 100.0;
+        // Fire-and-forget read of raw_adc from the calibration cluster on the same
+        // endpoint.  The readResponse is handled by fzCal and updates raw_adc_sensor_N.
+        // This avoids needing a separate ZCL binding for the custom cluster.
+        msg.endpoint.read(CAL_CLUSTER_CODE, [0x0005]).catch(() => {});
         return {[`soil_moisture_sensor_${msg.endpoint.ID}`]: pct};
     },
 };
@@ -95,9 +84,9 @@ const fzFirmwareVersion = {
     cluster: 'genOta',
     type: ['attributeReport', 'readResponse', 'commandQueryNextImageRequest'],
     convert(model, msg, publish, options, meta) {
-        // Query Next Image Request carries the version in msg.data.currentFileVersion
-        // Attribute read/report carries it in msg.data['currentFileVersion']
-        const raw = msg.data['currentFileVersion'] ?? msg.data.currentFileVersion;
+        // The Query Next Image Request command carries the running version in
+        // `fileVersion`; an attribute read/report carries it in `currentFileVersion`.
+        const raw = msg.data['currentFileVersion'] ?? msg.data['fileVersion'];
         if (raw !== undefined) {
             const v     = raw >>> 0;
             const major = (v >>> 24) & 0xFF;
@@ -138,6 +127,8 @@ const tzCal = {
         'capture_dry',
         'capture_wet',
         'report_now',
+        'cal_dry',
+        'cal_wet',
     ],
     convertSet: async (entity, key, value, meta) => {
         // ── Calibration target (dropdown) – state only, no device write ─────────
@@ -196,10 +187,11 @@ const tzCal = {
             await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0003]);
         } else if (key === 'sleep_enabled') {
             await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0004]);
-        } else {
-            const m    = key.match(/^cal_(dry|wet)_sensor_(\d+)$/);
-            const attr = m ? (m[1] === 'dry' ? 'calDry' : 'calWet') : null;
-            if (attr) await entity.read(CAL_CLUSTER_NAME, [attr]);
+        } else if (key === 'cal_dry' || key === 'cal_wet') {
+            const epName = meta.endpoint_name || 'sensor_1';
+            const epId   = parseInt(epName.replace('sensor_', ''), 10) || 1;
+            const attrId = key === 'cal_dry' ? 0x0001 : 0x0002;
+            await meta.device.getEndpoint(epId).read(CAL_CLUSTER_CODE, [attrId]);
         }
     },
 };
@@ -261,10 +253,10 @@ function buildExposes() {
             e.numeric('raw_adc', ea.STATE)
                 .withDescription(`Sensor ${i} last raw ADC reading (0–4095). Updated each reporting cycle.`)
                 .withEndpoint(`sensor_${i}`),
-            e.numeric('cal_dry', ea.STATE)
+            e.numeric('cal_dry', ea.STATE_GET)
                 .withDescription(`Sensor ${i}: ADC value in dry air (→ 0 %). Set via Capture dry above.`)
                 .withEndpoint(`sensor_${i}`),
-            e.numeric('cal_wet', ea.STATE)
+            e.numeric('cal_wet', ea.STATE_GET)
                 .withDescription(`Sensor ${i}: ADC value submerged in water (→ 100 %). Set via Capture wet above.`)
                 .withEndpoint(`sensor_${i}`),
         );
@@ -291,6 +283,34 @@ export default {
     ota:         true,
     meta:        {multiEndpoint: true},
     endpoint:    () => endpointMap(),
-    // Sleepy end device – pushes data on wake-up, no cluster binds needed.
-    configure:   async () => {},
+    // Register the manufacturer-specific calibration cluster ON THE DEVICE so
+    // zigbee-herdsman resolves 0xFC11 → 'jltSoilCal' for this device.  Without
+    // this, incoming frames stay as the raw numeric cluster 64529 and fzCal
+    // (which matches cluster: 'jltSoilCal') never fires → no raw_adc / cal values.
+    extend:      [deviceAddCustomCluster(CAL_CLUSTER_NAME, CAL_CLUSTER_DEF)],
+    // Bind coordinator to each sensor endpoint so z2m routes incoming attribute
+    // reports through the fromZigbee converters.  The device must be awake.
+    configure: async (device, coordinatorEndpoint) => {
+        for (let i = 1; i <= NUM_SENSORS; i++) {
+            const ep = device.getEndpoint(i);
+            if (!ep) continue;
+            try { await ep.bind('msRelativeHumidity', coordinatorEndpoint); } catch (_) {}
+            try { await ep.bind('genPowerCfg',        coordinatorEndpoint); } catch (_) {}
+            // Bind the custom calibration cluster too.  The firmware now reports
+            // its 0xFC11 attributes via DIRECT addressing to the coordinator
+            // (so a binding is not strictly required), but binding is harmless
+            // and keeps the binding table consistent.
+            try { await ep.bind(CAL_CLUSTER_CODE, coordinatorEndpoint); } catch (_) {}
+            // For sensor 1 also read device-wide attrs (sleep_duration 0x0003, sleep_enabled 0x0004)
+            // in the same request to avoid a separate round-trip that can time out.
+            const calAttrs = i === 1
+                ? [0x0001, 0x0002, 0x0003, 0x0004, 0x0005]
+                : [0x0001, 0x0002, 0x0005];
+            try { await ep.read(CAL_CLUSTER_CODE, calAttrs); } catch (_) {}
+        }
+        // Read firmware version from the OTA upgrade cluster.
+        try { await device.getEndpoint(1).read('genOta', ['currentFileVersion']); } catch (_) {}
+        // Read the user LED on/off state (endpoint 4) so user_led populates.
+        try { await device.getEndpoint(4).read('genOnOff', ['onOff']); } catch (_) {}
+    },
 };
