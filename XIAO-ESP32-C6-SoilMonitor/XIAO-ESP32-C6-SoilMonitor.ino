@@ -260,7 +260,7 @@ static uint16_t readBatteryMillivolts() {
     delay(2);
   }
   uint32_t vmeasMv = sum / ADC_SAMPLES;
-  return (uint16_t)(vmeasMv * BATTERY_DIVIDER_RATIO);
+  return (uint16_t)(vmeasMv * BATTERY_DIVIDER_RATIO * BATTERY_CALIBRATION);
 }
 
 // =============================================================================

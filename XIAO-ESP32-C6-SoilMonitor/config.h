@@ -58,6 +58,11 @@ static const SensorAdcConfig SENSOR_ADC_CONFIG[10] = {
 // Battery uses A0 (GPIO0) which is free.
 #define BATTERY_ADC_PIN        A0       // GPIO0 – free onboard ADC pin
 #define BATTERY_DIVIDER_RATIO  2.0f     // Vbat = Vmeasured × ratio  (100k/100k = 2)
+// Empirical correction factor for ADC under-/over-reading near the top of its
+// range.  Measure the real battery voltage with a multimeter, divide it by the
+// voltage the device reports, and set the result here.
+// Example: real 4.00 V, device reports 3.70 V → 4.00 / 3.70 ≈ 1.081.
+#define BATTERY_CALIBRATION    1.081f   // multiplier applied to the measured Vbat
 #define BATTERY_FULL_MV        4200     // mV at 100%  (fully charged 18650)
 #define BATTERY_EMPTY_MV       3000     // mV at   0%  (safe cutoff for 18650)
 // ADC_MAX_VALUE and ADC_REF_MV removed – battery now uses analogReadMilliVolts()
