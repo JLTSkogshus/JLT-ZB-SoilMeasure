@@ -7,33 +7,36 @@
 
 // ── Sensor Count ──────────────────────────────────────────────────
 // Number of sensors physically connected (1–9).
-#define NUM_SENSORS 3
+#define NUM_SENSORS 2
 
 // ── Sensor ADC Sources ──────────────────────────────────────────────────
 // Map each sensor slot (0-based) to an ADC source.
-// All 9 entries must be present; only the first NUM_SENSORS are used.
+// All 10 entries must be present; only the first NUM_SENSORS are used.
 //
 //  ADC_ONBOARD  →  { ADC_ONBOARD, pin,   0,       0     }
 //  ADC_ADS1115  →  { ADC_ADS1115, 0,     i2cAddr, chan  }
 //
-// XIAO ESP32-C6 I2C: SDA=D4(A4/GPIO6), SCL=D5(A5/GPIO7)
-//   → A4 and A5 are NOT available as analog inputs when I2C is active.
-//   Available onboard ADC pins: A0 (GPIO2), A1 (GPIO3), A2 (GPIO4), A3 (GPIO5)
+// XIAO ESP32-C6 actual pin → GPIO mapping (from variants/XIAO_ESP32C6/pins_arduino.h):
+//   A0/D0 = GPIO0,  A1/D1 = GPIO1,  A2/D2 = GPIO2
+//   D4/SDA = GPIO22,  D5/SCL = GPIO23  (reserved for I2C when ADS1115 is used)
+//   Available onboard ADC pins: A0 (GPIO0), A1 (GPIO1), A2 (GPIO2)
 //
 // ADS1115 I2C addresses (set via ADDR pin):
 //   ADDR→GND = 0x48,  ADDR→VDD = 0x49,  ADDR→SDA = 0x4A,  ADDR→SCL = 0x4B
 // ───────────────────────────────────────────────────────────────────────────
-static const SensorAdcConfig SENSOR_ADC_CONFIG[9] = {
+static const SensorAdcConfig SENSOR_ADC_CONFIG[10] = {
     //          source        pin  i2cAddr  chan
-    { ADC_ADS1115,  0,   0x48,    0 },  // S1: ADS1115 #1 (0x48) ch0
-    { ADC_ADS1115,  0,   0x48,    1 },  // S2: ADS1115 #1 (0x48) ch1
-    { ADC_ONBOARD,  A1,  0,       0 },  // S3: onboard A1 (GPIO3)
-    { ADC_ADS1115,  0,   0x48,    2 },  // S4: ADS1115 #1 (0x48) ch2
-    { ADC_ADS1115,  0,   0x48,    3 },  // S5: ADS1115 #1 (0x48) ch3
-    { ADC_ADS1115,  0,   0x49,    0 },  // S6: ADS1115 #2 (0x49) ch0
-    { ADC_ADS1115,  0,   0x49,    1 },  // S7: ADS1115 #2 (0x49) ch1
-    { ADC_ADS1115,  0,   0x49,    2 },  // S8: ADS1115 #2 (0x49) ch2
-    { ADC_ONBOARD,  A2,  0,       0 },  // S9: onboard A2 (GPIO4)
+    { ADC_ONBOARD,  A1,  0,       0 },  // S1: onboard A1 (GPIO1)
+    { ADC_ONBOARD,  A2,  0,       0 },  // S2: onboard A2 (GPIO2)
+    { ADC_ADS1115,  0,   0x48,    0 },  // S3: ADS1115 #1 (0x48) ch0  – expansion slot
+    { ADC_ADS1115,  0,   0x48,    1 },  // S4: ADS1115 #1 (0x48) ch1
+    { ADC_ADS1115,  0,   0x48,    2 },  // S5: ADS1115 #1 (0x48) ch2
+    { ADC_ADS1115,  0,   0x48,    3 },  // S6: ADS1115 #1 (0x48) ch3
+    { ADC_ADS1115,  0,   0x49,    0 },  // S7: ADS1115 #2 (0x49) ch0
+    { ADC_ADS1115,  0,   0x49,    1 },  // S8: ADS1115 #2 (0x49) ch1
+    { ADC_ADS1115,  0,   0x49,    2 },  // S9: ADS1115 #2 (0x49) ch2
+    { ADC_ADS1115,  0,   0x49,    3 },  // S10: ADS1115 #2 (0x49) ch3
+
 };
 
 // ── Moisture Calibration Factory Defaults ────────────────────────────────────
@@ -51,14 +54,14 @@ static const SensorAdcConfig SENSOR_ADC_CONFIG[9] = {
 //   Vbat ──[100 kΩ]──┬──[100 kΩ]── GND
 //                     └── BATTERY_ADC_PIN
 // This halves the voltage so 4.2 V → 2.1 V, safely within the 3.3 V ADC range.
-// NOTE: A4 (GPIO6/SDA) and A5 (GPIO7/SCL) are reserved for I2C (ADS1115).
-// Battery must use A0, A1, A2, or A3.  Default: A0.
-#define BATTERY_ADC_PIN        A0       // GPIO2 – free onboard ADC pin
+// NOTE: A1 (GPIO1) and A2 (GPIO2) are used for soil sensors S1/S2.
+// Battery uses A0 (GPIO0) which is free.
+#define BATTERY_ADC_PIN        A0       // GPIO0 – free onboard ADC pin
 #define BATTERY_DIVIDER_RATIO  2.0f     // Vbat = Vmeasured × ratio  (100k/100k = 2)
 #define BATTERY_FULL_MV        4200     // mV at 100%  (fully charged 18650)
 #define BATTERY_EMPTY_MV       3000     // mV at   0%  (safe cutoff for 18650)
-#define ADC_MAX_VALUE          4095.0f  // 12-bit ADC (ESP32-C6 default)
-#define ADC_REF_MV             3300.0f  // ADC reference voltage (3.3 V rail)
+// ADC_MAX_VALUE and ADC_REF_MV removed – battery now uses analogReadMilliVolts()
+// which applies the ESP-IDF factory calibration curve internally.
 
 // ── ADC Sampling ──────────────────────────────────────────────────────────────
 #define ADC_SAMPLES   10   // Readings to average per sensor/battery sample

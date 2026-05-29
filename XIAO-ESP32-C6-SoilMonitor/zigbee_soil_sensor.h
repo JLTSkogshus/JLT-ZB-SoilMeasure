@@ -30,6 +30,11 @@ protected:
     void zbAttributeSet(const esp_zb_zcl_set_attr_value_message_t *message) override;
 
 private:
+
     uint8_t _sensorIdx;
     void    _addCalibrationCluster();
 };
+
+// App-task helpers to consume the report-now flag set by the Zigbee callback.
+bool zigbeeSoilGetReportNow();
+void zigbeeSoilClearReportNow();

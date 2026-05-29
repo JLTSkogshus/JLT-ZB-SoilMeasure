@@ -72,10 +72,10 @@ RTC_DATA_ATTR static uint32_t s_nextWakeupSec     = 0;   // seconds since power-
 // Relative Humidity (moisture %), and calibration cluster 0xFC11.
 // Only the first NUM_SENSORS endpoints are registered with the Zigbee stack.
 // =============================================================================
-static ZigbeeSoilSensor zbSoil0(1,0), zbSoil1(2,1), zbSoil2(3,2);
+static ZigbeeSoilSensor zbSoil0(1,0), zbSoil1(2,1);
 
 static ZigbeeSoilSensor* const zbSoils[NUM_SENSORS] = {
-  &zbSoil0, &zbSoil1, &zbSoil2
+  &zbSoil0, &zbSoil1
 };
 
 // Endpoint 4 – onboard user LED (active low: LOW = on, HIGH = off)
@@ -210,7 +210,15 @@ void setup() {
     for (;;) {
       uint32_t interval_ms = (uint32_t)Calibration.getSleepSeconds() * 1000UL;
       uint32_t t0 = millis();
-      while (millis() - t0 < interval_ms) delay(100);
+      while (millis() - t0 < interval_ms) {
+        delay(100);
+        if (zigbeeSoilGetReportNow()) {
+          zigbeeSoilClearReportNow();
+          Serial.println("[report] Immediate report triggered via Zigbee.");
+          reportAllSensors();
+          t0 = millis();  // reset interval so next scheduled report isn't immediate
+        }
+      }
       reportAllSensors();
       zbSoil0.requestOTAUpdate();
       if (Calibration.getSleepEnabled()) {
@@ -244,11 +252,10 @@ static void onLedChange(bool state) {
 static uint16_t readBatteryMillivolts() {
   uint32_t sum = 0;
   for (int i = 0; i < ADC_SAMPLES; i++) {
-    sum += analogRead(BATTERY_ADC_PIN);
+    sum += (uint32_t)analogReadMilliVolts(BATTERY_ADC_PIN);
     delay(2);
   }
-  float rawAvg  = (float)(sum / ADC_SAMPLES);
-  float vmeasMv = (rawAvg / ADC_MAX_VALUE) * ADC_REF_MV;
+  uint32_t vmeasMv = sum / ADC_SAMPLES;
   return (uint16_t)(vmeasMv * BATTERY_DIVIDER_RATIO);
 }
 

@@ -4,11 +4,13 @@
 
 // Static per-sensor attribute storage – pointers passed to ZCL must remain valid
 // for the lifetime of the endpoint (i.e. forever for global objects).
-static uint16_t s_calDry[9];
-static uint16_t s_calWet[9];
-static uint16_t s_rawAdc[9]      = {};  // last raw ADC reading per sensor (read-only attribute)
+static uint16_t s_calDry[10];
+static uint16_t s_calWet[10];
+static uint16_t s_rawAdc[10]     = {};  // last raw ADC reading per sensor (read-only attribute)
 static uint32_t s_sleepSec;            // device-wide sleep duration (seconds)
 static uint8_t  s_sleepEnabled;        // device-wide: 0 = awake mode, 1 = deep-sleep mode
+static uint8_t  s_reportNowAttr = 0;   // ZCL backing store for report_now attribute
+static volatile bool s_reportNow = false; // set by Zigbee task, read by app task
 
 // =============================================================================
 // Constructor
@@ -67,6 +69,12 @@ void ZigbeeSoilSensor::_addCalibrationCluster() {
         ESP_ZB_ZCL_ATTR_ACCESS_READ_ONLY,
         &s_rawAdc[_sensorIdx]);
 
+    esp_zb_custom_cluster_add_custom_attr(
+        attrs, CAL_ATTR_REPORT_NOW,
+        ESP_ZB_ZCL_ATTR_TYPE_U8,
+        ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE,
+        &s_reportNowAttr);
+
     esp_zb_cluster_list_add_custom_cluster(
         _cluster_list, attrs,
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
@@ -104,6 +112,11 @@ void ZigbeeSoilSensor::zbAttributeSet(const esp_zb_zcl_set_attr_value_message_t 
             Calibration.setSleepEnabled(en != 0);
             return;
         }
+        case CAL_ATTR_REPORT_NOW: {
+            uint8_t val = *reinterpret_cast<const uint8_t *>(message->attribute.data.value);
+            if (val) s_reportNow = true;
+            return;
+        }
         default:
             return;
     }
@@ -118,3 +131,10 @@ void ZigbeeSoilSensor::zbAttributeSet(const esp_zb_zcl_set_attr_value_message_t 
 void ZigbeeSoilSensor::setRawAdc(uint16_t raw) {
     s_rawAdc[_sensorIdx] = raw;
 }
+
+// =============================================================================
+// Free functions for the app task to check / clear the report-now flag.
+// The flag is set by the Zigbee task (zbAttributeSet) and consumed by setup().
+// =============================================================================
+bool zigbeeSoilGetReportNow()   { return s_reportNow; }
+void zigbeeSoilClearReportNow() { s_reportNow = false; }

@@ -35,7 +35,7 @@ import {Zcl}         from 'zigbee-herdsman';
 import {battery}     from 'zigbee-herdsman-converters/converters/fromZigbee';
 import {presets as e, access as ea} from 'zigbee-herdsman-converters/lib/exposes';
 
-const NUM_SENSORS = 3;   // ← change this to match NUM_SENSORS in config.h
+const NUM_SENSORS = 2;   // ← change this to match NUM_SENSORS in config.h
 
 // ─── Cluster constants ────────────────────────────────────────────────────────
 const CAL_CLUSTER_CODE = 0xFC11;
@@ -55,6 +55,7 @@ try {
             sleepDuration: {ID: 0x0003, type: Zcl.DataType.UINT32},
             sleepEnabled:  {ID: 0x0004, type: Zcl.DataType.UINT8},
             rawAdc:        {ID: 0x0005, type: Zcl.DataType.UINT16},
+            reportNow:     {ID: 0x0006, type: Zcl.DataType.UINT8},
         },
         commands:         {},
         commandsResponse: {},
@@ -68,7 +69,9 @@ try {
             if (!existing.attributes.sleepEnabled)
                 existing.attributes.sleepEnabled = {ID: 0x0004, type: Zcl.DataType.UINT8};
             if (!existing.attributes.rawAdc)
-                existing.attributes.rawAdc = {ID: 0x0005, type: Zcl.DataType.UINT16};
+                existing.attributes.rawAdc = {ID: 0x0005, type: Zcl.DataType.UINT8};
+            if (!existing.attributes.reportNow)
+                existing.attributes.reportNow = {ID: 0x0006, type: Zcl.DataType.UINT8};
         }
     } catch (_2) { /* best-effort */ }
 }
@@ -131,8 +134,45 @@ const tzCal = {
     key: [
         'sleep_duration',
         'sleep_enabled',
+        'calibration_target',
+        'capture_dry',
+        'capture_wet',
+        'report_now',
     ],
     convertSet: async (entity, key, value, meta) => {
+        // ── Calibration target (dropdown) – state only, no device write ─────────
+        if (key === 'calibration_target') {
+            return {state: {calibration_target: value}};
+        }
+        // ── Report now ───────────────────────────────────────────────────────────
+        if (key === 'report_now') {
+            if (value !== 'ON' && value !== true) return {state: {report_now: 'OFF'}};
+            await meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0006: {value: 1, type: Zcl.DataType.UINT8}});
+            return {state: {report_now: 'OFF'}};
+        }
+        // ── Capture dry / wet calibration point ──────────────────────────────────
+        // Reads the current raw ADC from attr 0x0005 of the selected endpoint,
+        // then writes it as the dry (0x0001) or wet (0x0002) calibration value.
+        // The device must be awake (sleep_enabled = OFF) for the read to succeed.
+        if (key === 'capture_dry' || key === 'capture_wet') {
+            if (value !== 'ON' && value !== true) return {state: {[key]: 'OFF'}};
+            const target = meta.state.calibration_target || 'sensor_1';
+            const epId   = parseInt(target.replace('sensor_', ''), 10);
+            if (isNaN(epId) || epId < 1 || epId > NUM_SENSORS)
+                throw new Error(`Invalid calibration_target: ${target}`);
+            const ep = meta.device.getEndpoint(epId);
+            // Use numeric IDs to bypass the cluster-list guard (same pattern as sleep_duration).
+            const res    = await ep.read(CAL_CLUSTER_CODE, [0x0005]);
+            const rawAdc = res[0x0005] ?? res['rawAdc'];
+            if (rawAdc === undefined)
+                throw new Error('Could not read rawAdc – ensure the device is awake (sleep_enabled = OFF).');
+            const isDry  = key === 'capture_dry';
+            await ep.write(CAL_CLUSTER_CODE, {
+                [isDry ? 0x0001 : 0x0002]: {value: rawAdc, type: Zcl.DataType.UINT16},
+            });
+            const calKey = `cal_${isDry ? 'dry' : 'wet'}_sensor_${epId}`;
+            return {state: {[key]: 'OFF', [calKey]: rawAdc}};
+        }
         // sleep_duration and sleep_enabled are device-wide (no withEndpoint) so
         // entity may be the Device object rather than an Endpoint, which would
         // cause UNSUPPORTED_CLUSTER. Always route them to endpoint 1 explicitly.
@@ -156,6 +196,10 @@ const tzCal = {
             await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0003]);
         } else if (key === 'sleep_enabled') {
             await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0004]);
+        } else {
+            const m    = key.match(/^cal_(dry|wet)_sensor_(\d+)$/);
+            const attr = m ? (m[1] === 'dry' ? 'calDry' : 'calWet') : null;
+            if (attr) await entity.read(CAL_CLUSTER_NAME, [attr]);
         }
     },
 };
@@ -197,6 +241,16 @@ function buildExposes() {
             .withDescription('Enable deep-sleep between readings. OFF = stay awake (development mode, default). ON = sleep between readings.'),
         e.binary('user_led', ea.ALL, 'ON', 'OFF')
             .withDescription('Onboard user LED (GPIO15, active low).'),
+        // ── Calibration UI ───────────────────────────────────────────────────────
+        e.enum('calibration_target', ea.STATE_SET,
+               Array.from({length: NUM_SENSORS}, (_, i) => `sensor_${i + 1}`))
+            .withDescription('Select which sensor to calibrate, then use the Capture buttons below.'),
+        e.binary('capture_dry', ea.SET, 'ON', 'OFF')
+            .withDescription('Place the selected sensor in dry air, then press to capture the dry calibration point (0 %). Device must be awake.'),
+        e.binary('capture_wet', ea.SET, 'ON', 'OFF')
+            .withDescription('Place the selected sensor in water, then press to capture the wet calibration point (100 %). Device must be awake.'),
+        e.binary('report_now', ea.SET, 'ON', 'OFF')
+            .withDescription('Trigger an immediate sensor report without waiting for the next scheduled interval. Device must be awake (sleep_enabled = OFF).'),
     ];
     for (let i = 1; i <= NUM_SENSORS; i++) {
         list.push(
@@ -208,10 +262,10 @@ function buildExposes() {
                 .withDescription(`Sensor ${i} last raw ADC reading (0–4095). Updated each reporting cycle.`)
                 .withEndpoint(`sensor_${i}`),
             e.numeric('cal_dry', ea.STATE)
-                .withDescription(`Sensor ${i}: ADC value in dry air (→ 0 %).`)
+                .withDescription(`Sensor ${i}: ADC value in dry air (→ 0 %). Set via Capture dry above.`)
                 .withEndpoint(`sensor_${i}`),
             e.numeric('cal_wet', ea.STATE)
-                .withDescription(`Sensor ${i}: ADC value submerged in water (→ 100 %).`)
+                .withDescription(`Sensor ${i}: ADC value submerged in water (→ 100 %). Set via Capture wet above.`)
                 .withEndpoint(`sensor_${i}`),
         );
     }
