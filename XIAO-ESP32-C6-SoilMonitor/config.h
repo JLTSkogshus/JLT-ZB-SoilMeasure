@@ -64,18 +64,18 @@ static const SensorAdcConfig SENSOR_ADC_CONFIG[10] = {
 // which applies the ESP-IDF factory calibration curve internally.
 
 // ── Sensor Power Control ──────────────────────────────────────────────────────
-// Wire sensor VCC (or GND for low-side NPN) through a transistor switch:
+// PNP high-side switch (e.g. BC327, 800 mA – supports 8+ sensors):
 //
-//   Option B – NPN low-side (recommended, supports any number of sensors):
-//     All sensor VCC → 3.3 V  (directly)
-//     All sensor GND → NPN collector
-//     NPN emitter    → board GND
-//     SENSOR_POWER_PIN → 10 kΩ → NPN base
-//     GPIO HIGH = transistor on = sensors powered
-//     GPIO LOW  = transistor off = sensors draw no current
+//   3.3 V ─── BC327 emitter
+//           BC327 collector ─── All sensor VCC
+//   D3 ──[4.7 kΩ]───────── BC327 base
+//   All sensor GND ──────── board GND
+//
+//   GPIO LOW  = transistor on  = sensors powered
+//   GPIO HIGH = transistor off = sensors draw no current
 //
 // Change SENSOR_POWER_PIN to any free digital output on your board.
-#define SENSOR_POWER_PIN        D3    // GPIO controlling transistor base
+#define SENSOR_POWER_PIN        D3    // GPIO controlling BC327 base (via 4.7 kΩ)
 #define SENSOR_POWER_SETTLE_MS  50    // ms after power-on before reading (sensor stabilise)
 
 // ── ADC Sampling ──────────────────────────────────────────────────────────────

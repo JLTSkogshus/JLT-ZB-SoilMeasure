@@ -12,8 +12,9 @@ static inline int addrIdx(uint8_t addr) { return (int)(addr - 0x48u); }
 
 void adcReaderBegin() {
     // Configure sensor power pin – start with sensors OFF.
+    // PNP (BC327): HIGH = base not driven = transistor off = sensors off.
     pinMode(SENSOR_POWER_PIN, OUTPUT);
-    digitalWrite(SENSOR_POWER_PIN, LOW);
+    digitalWrite(SENSOR_POWER_PIN, HIGH);
 
     Wire.begin();
 
@@ -39,12 +40,12 @@ void adcReaderBegin() {
 }
 
 void adcPowerOn() {
-    digitalWrite(SENSOR_POWER_PIN, HIGH);  // enable transistor → sensors on
+    digitalWrite(SENSOR_POWER_PIN, LOW);   // PNP: base LOW → transistor on → sensor VCC = 3.3 V
     delay(SENSOR_POWER_SETTLE_MS);         // wait for sensor output to stabilise
 }
 
 void adcPowerOff() {
-    digitalWrite(SENSOR_POWER_PIN, LOW);   // disable transistor → sensors draw no current
+    digitalWrite(SENSOR_POWER_PIN, HIGH);  // PNP: base HIGH → transistor off → no current drawn
 }
 
 uint16_t adcReadRaw(uint8_t sensorIdx) {
