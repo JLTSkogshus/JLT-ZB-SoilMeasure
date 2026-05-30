@@ -291,6 +291,9 @@ static void reportAllSensors() {
                 (unsigned long)s_nextWakeupSec,
                 (unsigned long)s_bootCount);
 
+  // Power sensors on, read, then immediately power off.
+  // Sensors draw no current outside this window (NPN transistor switch).
+  adcPowerOn();
   for (int i = 0; i < NUM_SENSORS; i++) {
     uint16_t raw = adcReadRaw(i);            // averaged, normalised to 12-bit
     SensorCalibration cal = Calibration.get(i);
@@ -308,6 +311,7 @@ static void reportAllSensors() {
     zbSoils[i]->reportHumidity();
     zbSoils[i]->reportRawAdc();              // report raw ADC via cluster 0xFC11 attr 0x0005
   }
+  adcPowerOff();
 }
 
 // =============================================================================

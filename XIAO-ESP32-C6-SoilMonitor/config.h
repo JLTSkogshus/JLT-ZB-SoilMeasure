@@ -63,6 +63,21 @@ static const SensorAdcConfig SENSOR_ADC_CONFIG[10] = {
 // ADC_MAX_VALUE and ADC_REF_MV removed – battery now uses analogReadMilliVolts()
 // which applies the ESP-IDF factory calibration curve internally.
 
+// ── Sensor Power Control ──────────────────────────────────────────────────────
+// Wire sensor VCC (or GND for low-side NPN) through a transistor switch:
+//
+//   Option B – NPN low-side (recommended, supports any number of sensors):
+//     All sensor VCC → 3.3 V  (directly)
+//     All sensor GND → NPN collector
+//     NPN emitter    → board GND
+//     SENSOR_POWER_PIN → 10 kΩ → NPN base
+//     GPIO HIGH = transistor on = sensors powered
+//     GPIO LOW  = transistor off = sensors draw no current
+//
+// Change SENSOR_POWER_PIN to any free digital output on your board.
+#define SENSOR_POWER_PIN        D3    // GPIO controlling transistor base
+#define SENSOR_POWER_SETTLE_MS  50    // ms after power-on before reading (sensor stabilise)
+
 // ── ADC Sampling ──────────────────────────────────────────────────────────────
 #define ADC_SAMPLES   10   // Readings to average per sensor/battery sample
 

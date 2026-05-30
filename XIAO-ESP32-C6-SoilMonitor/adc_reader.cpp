@@ -11,6 +11,10 @@ static bool             s_adsReady[4] = { false, false, false, false };
 static inline int addrIdx(uint8_t addr) { return (int)(addr - 0x48u); }
 
 void adcReaderBegin() {
+    // Configure sensor power pin – start with sensors OFF.
+    pinMode(SENSOR_POWER_PIN, OUTPUT);
+    digitalWrite(SENSOR_POWER_PIN, LOW);
+
     Wire.begin();
 
     for (int si = 0; si < NUM_SENSORS; si++) {
@@ -32,6 +36,15 @@ void adcReaderBegin() {
             Serial.printf("[adc] ERROR: ADS1115 at 0x%02X not found – check wiring!\n", addr);
         }
     }
+}
+
+void adcPowerOn() {
+    digitalWrite(SENSOR_POWER_PIN, HIGH);  // enable transistor → sensors on
+    delay(SENSOR_POWER_SETTLE_MS);         // wait for sensor output to stabilise
+}
+
+void adcPowerOff() {
+    digitalWrite(SENSOR_POWER_PIN, LOW);   // disable transistor → sensors draw no current
 }
 
 uint16_t adcReadRaw(uint8_t sensorIdx) {

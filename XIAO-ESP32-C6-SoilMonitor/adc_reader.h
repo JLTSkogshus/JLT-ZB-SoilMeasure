@@ -41,8 +41,16 @@ struct SensorAdcConfig {
 };
 
 // Call once from setup() – initialises Wire and all unique ADS1115 chips
-// declared in SENSOR_ADC_CONFIG.
+// declared in SENSOR_ADC_CONFIG.  Also configures SENSOR_POWER_PIN as output
+// and leaves sensors powered OFF.
 void adcReaderBegin();
+
+// Drive SENSOR_POWER_PIN HIGH and wait SENSOR_POWER_SETTLE_MS.
+// Call immediately before adcReadRaw().
+void adcPowerOn();
+
+// Drive SENSOR_POWER_PIN LOW – cuts sensor VCC during deep sleep.
+void adcPowerOff();
 
 // Read the averaged, normalised ADC value for a sensor (0-based index).
 // Returns 0–4095 for both onboard and ADS1115 sources.
