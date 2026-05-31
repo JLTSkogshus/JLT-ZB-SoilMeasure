@@ -187,12 +187,16 @@ const tzCal = {
         // cause UNSUPPORTED_CLUSTER. Always route them to endpoint 1 explicitly.
         if (key === 'checkin_interval') {
             const secs = Math.max(60, parseInt(value, 10));
-            await meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0003: {value: secs, type: Zcl.DataType.UINT32}});
+            // Device may be sleeping; write best-effort. State is always persisted so
+            // the onEvent handler can re-apply it on the next announce / wake-up.
+            await meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0003: {value: secs, type: Zcl.DataType.UINT32}}).catch(() => {});
             return {state: {checkin_interval: secs}};
         }
         if (key === 'sleep_enabled') {
             const en = (value === 'ON' || value === true || value === 1) ? 1 : 0;
-            await meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0004: {value: en, type: Zcl.DataType.UINT8}});
+            // Device may be sleeping; write best-effort. State is always persisted so
+            // the onEvent handler can re-apply it on the next announce / wake-up.
+            await meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0004: {value: en, type: Zcl.DataType.UINT8}}).catch(() => {});
             return {state: {sleep_enabled: en ? 'ON' : 'OFF'}};
         }
     },
