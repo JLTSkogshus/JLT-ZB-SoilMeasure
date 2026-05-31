@@ -64,18 +64,20 @@ static const SensorAdcConfig SENSOR_ADC_CONFIG[10] = {
 // which applies the ESP-IDF factory calibration curve internally.
 
 // ── Sensor Power Control ──────────────────────────────────────────────────────
-// PNP high-side switch (e.g. BC327, 800 mA – supports 8+ sensors):
+// NPN low-side switch (e.g. BC337-40, 800 mA, hFE 250 – supports 8+ sensors):
 //
-//   3.3 V ─── BC327 emitter
-//           BC327 collector ─── All sensor VCC
-//   D3 ──[4.7 kΩ]───────── BC327 base
-//   All sensor GND ──────── board GND
+//   All sensor VCC ──────────── 3.3 V
+//   All sensor GND ─── BC337 collector
+//   BC337 emitter  ─── board GND
+//   D3 ──[10 kΩ]───────── BC337 base
+//   BC337 base ──[100 kΩ]── GND   ← pull-down: keeps transistor off if GPIO floats during sleep
 //
-//   GPIO LOW  = transistor on  = sensors powered
-//   GPIO HIGH = transistor off = sensors draw no current
+//   GPIO HIGH = transistor on  = sensors grounded = sensors active
+//   GPIO LOW  = transistor off = sensors draw no current
+//   Deep sleep: GPIO floats LOW (held by pull-down) – no active driving needed
 //
 // Change SENSOR_POWER_PIN to any free digital output on your board.
-#define SENSOR_POWER_PIN        D3    // GPIO controlling BC327 base (via 4.7 kΩ)
+#define SENSOR_POWER_PIN        D3    // GPIO controlling BC337 base (via 10 kΩ)
 #define SENSOR_POWER_SETTLE_MS  50    // ms after power-on before reading (sensor stabilise)
 
 // ── ADC Sampling ──────────────────────────────────────────────────────────────
