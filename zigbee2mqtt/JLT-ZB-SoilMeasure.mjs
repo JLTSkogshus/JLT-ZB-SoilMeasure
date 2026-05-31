@@ -119,10 +119,15 @@ const fzCal = {
         const wet    = msg.data['calWet']        ?? msg.data[0x0002];
         if (dry !== undefined) result[`cal_dry_sensor_${ep}`] = dry;
         if (wet !== undefined) result[`cal_wet_sensor_${ep}`] = wet;
-        const sleepEn = msg.data['sleepEnabled'] ?? msg.data[0x0004];
-        if (sleepEn !== undefined) result['sleep_enabled'] = sleepEn ? 'ON' : 'OFF';
-        const sleepDur = msg.data['sleepDuration'] ?? msg.data[0x0003];
-        if (sleepDur !== undefined) result['checkin_interval'] = Math.max(60, sleepDur);
+        // Only update sleep settings from explicit reads (readResponse), not from
+        // unsolicited device attribute reports.  This prevents the device's current
+        // NVS value from overwriting a pending desired-state change stored in z2m.
+        if (msg.type === 'readResponse') {
+            const sleepEn = msg.data['sleepEnabled'] ?? msg.data[0x0004];
+            if (sleepEn !== undefined) result['sleep_enabled'] = sleepEn ? 'ON' : 'OFF';
+            const sleepDur = msg.data['sleepDuration'] ?? msg.data[0x0003];
+            if (sleepDur !== undefined) result['checkin_interval'] = Math.max(60, sleepDur);
+        }
         const rawAdc = msg.data['rawAdc'] ?? msg.data[0x0005];
         if (rawAdc !== undefined) result[`raw_adc_sensor_${ep}`] = rawAdc;
         return result;
@@ -191,16 +196,16 @@ const tzCal = {
         // cause UNSUPPORTED_CLUSTER. Always route them to endpoint 1 explicitly.
         if (key === 'checkin_interval') {
             const secs = Math.max(60, parseInt(value, 10));
-            // Device may be sleeping; write best-effort. State is always persisted so
-            // the onEvent handler can re-apply it on the next announce / wake-up.
-            await meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0003: {value: secs, type: Zcl.DataType.UINT32}}).catch(() => {});
+            // Fire-and-forget: device may be sleeping. Returning state immediately so
+            // the UI updates at once; onEvent re-applies it on the next wake-up.
+            meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0003: {value: secs, type: Zcl.DataType.UINT32}}).catch(() => {});
             return {state: {checkin_interval: secs}};
         }
         if (key === 'sleep_enabled') {
             const en = (value === 'ON' || value === true || value === 1) ? 1 : 0;
-            // Device may be sleeping; write best-effort. State is always persisted so
-            // the onEvent handler can re-apply it on the next announce / wake-up.
-            await meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0004: {value: en, type: Zcl.DataType.UINT8}}).catch(() => {});
+            // Fire-and-forget: device may be sleeping. Returning state immediately so
+            // the switch flips at once; onEvent re-applies it on the next wake-up.
+            meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0004: {value: en, type: Zcl.DataType.UINT8}}).catch(() => {});
             return {state: {sleep_enabled: en ? 'ON' : 'OFF'}};
         }
     },
@@ -229,11 +234,9 @@ function buildExposes() {
             .withDescription('Installed firmware version (e.g. 1.0.0). Updated when device checks for OTA.'),
         e.numeric('checkin_interval', ea.ALL)
             .withUnit('s')
-            .withDescription('Deep-sleep duration between reporting cycles (seconds, minimum 60). Takes effect on next wake-up. Enable sleep with sleep_enabled = ON.')
-            .withCategory('config'),
+            .withDescription('Deep-sleep duration between reporting cycles (seconds, minimum 60). Takes effect on next wake-up. Enable sleep with sleep_enabled = ON.'),
         e.binary('sleep_enabled', ea.ALL, 'ON', 'OFF')
-            .withDescription('Enable deep-sleep between readings. OFF = stay awake (development mode, default). ON = sleep between readings.')
-            .withCategory('config'),
+            .withDescription('Enable deep-sleep between readings. OFF = stay awake (development mode, default). ON = sleep between readings.'),
         // ── Calibration UI ───────────────────────────────────────────────────────
         e.enum('calibration_target', ea.STATE_SET,
                Array.from({length: NUM_SENSORS}, (_, i) => `sensor_${i + 1}`))
