@@ -217,6 +217,7 @@ void setup() {
     for (;;) {
       uint32_t t0 = millis();
       // Re-evaluate sleep_duration each tick so a z2m write takes effect within 100 ms.
+      bool sleepRequestedMidCycle = false;
       while (millis() - t0 < (uint32_t)Calibration.getSleepSeconds() * 1000UL) {
         delay(100);
         if (zigbeeSoilGetReportNow()) {
@@ -225,10 +226,15 @@ void setup() {
           reportAllSensors();
           t0 = millis();  // reset interval so next scheduled report isn't immediate
         }
+        // Check sleep_enabled every tick so enabling it takes effect within 100 ms.
+        if (Calibration.getSleepEnabled()) {
+          sleepRequestedMidCycle = true;
+          break;
+        }
       }
       reportAllSensors();
       zbSoil0.requestOTAUpdate();
-      if (Calibration.getSleepEnabled()) {
+      if (sleepRequestedMidCycle || Calibration.getSleepEnabled()) {
         Serial.println("[sleep] Sleep re-enabled – entering deep sleep.");
         break;
       }

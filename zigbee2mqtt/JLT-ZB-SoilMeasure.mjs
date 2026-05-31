@@ -145,7 +145,18 @@ const tzCal = {
         // ── Report now ───────────────────────────────────────────────────────────
         if (key === 'report_now') {
             if (value !== 'ON' && value !== true) return {state: {report_now: 'OFF'}};
-            await meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0006: {value: 1, type: Zcl.DataType.UINT8}});
+            const ep = meta.device.getEndpoint(1);
+            // Re-push sleep settings while device is awake so any change made in
+            // z2m while the device was asleep takes effect immediately.
+            if (meta.state?.sleep_enabled !== undefined) {
+                const en = (meta.state.sleep_enabled === 'ON' || meta.state.sleep_enabled === true) ? 1 : 0;
+                await ep.write(CAL_CLUSTER_CODE, {0x0004: {value: en, type: Zcl.DataType.UINT8}}).catch(() => {});
+            }
+            if (meta.state?.checkin_interval !== undefined) {
+                const secs = Math.max(60, Math.round(meta.state.checkin_interval));
+                await ep.write(CAL_CLUSTER_CODE, {0x0003: {value: secs, type: Zcl.DataType.UINT32}}).catch(() => {});
+            }
+            await ep.write(CAL_CLUSTER_CODE, {0x0006: {value: 1, type: Zcl.DataType.UINT8}});
             return {state: {report_now: 'OFF'}};
         }
         // ── Capture dry / wet calibration point ──────────────────────────────────
