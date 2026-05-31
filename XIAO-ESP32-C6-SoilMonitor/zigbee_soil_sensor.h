@@ -40,6 +40,7 @@ private:
 
     uint8_t _sensorIdx;
     void    _addCalibrationCluster();
+    void    _addPollControlCluster();  // genPollCtrl (0x0020) – EP1 only
     // Report a single 0xFC11 attribute to the coordinator via direct addressing.
     bool    _reportCustomAttr(uint16_t attrId);
 };

@@ -53,7 +53,6 @@ const CAL_CLUSTER_DEF = {
     attributes: {
         calDry:        {name: 'calDry',        ID: 0x0001, type: Zcl.DataType.UINT16},
         calWet:        {name: 'calWet',        ID: 0x0002, type: Zcl.DataType.UINT16},
-        sleepDuration: {name: 'sleepDuration', ID: 0x0003, type: Zcl.DataType.UINT32},
         sleepEnabled:  {name: 'sleepEnabled',  ID: 0x0004, type: Zcl.DataType.UINT8},
         rawAdc:        {name: 'rawAdc',        ID: 0x0005, type: Zcl.DataType.UINT16},
         reportNow:     {name: 'reportNow',     ID: 0x0006, type: Zcl.DataType.UINT8},
@@ -113,10 +112,8 @@ const fzCal = {
         const result = {};
         const dry    = msg.data['calDry']        ?? msg.data[0x0001];
         const wet    = msg.data['calWet']        ?? msg.data[0x0002];
-        const sleep  = msg.data['sleepDuration'] ?? msg.data[0x0003];
-        if (dry   !== undefined) result[`cal_dry_sensor_${ep}`] = dry;
-        if (wet   !== undefined) result[`cal_wet_sensor_${ep}`] = wet;
-        if (sleep !== undefined) result['sleep_duration']       = sleep;
+        if (dry !== undefined) result[`cal_dry_sensor_${ep}`] = dry;
+        if (wet !== undefined) result[`cal_wet_sensor_${ep}`] = wet;
         const sleepEn = msg.data['sleepEnabled'] ?? msg.data[0x0004];
         if (sleepEn !== undefined) result['sleep_enabled'] = sleepEn ? 'ON' : 'OFF';
         const rawAdc = msg.data['rawAdc'] ?? msg.data[0x0005];
@@ -125,10 +122,22 @@ const fzCal = {
     },
 };
 
-// ─── toZigbee: write calibration / sleep duration ────────────────────────────
+// ─── fromZigbee: genPollCtrl → checkin_interval (seconds) ────────────────────
+// z2m reads checkinInterval (quarter-seconds) from the genPollCtrl cluster on
+// endpoint 1 and converts it to seconds for the checkin_interval expose.
+const fzPollCtrl = {
+    cluster: 'genPollCtrl',
+    type: ['attributeReport', 'readResponse'],
+    convert(model, msg, publish, options, meta) {
+        const qs = msg.data['checkinInterval'];
+        if (qs !== undefined) return {checkin_interval: Math.max(60, Math.round(qs / 4))};
+    },
+};
+
+// ─── toZigbee: write calibration / sleep settings ───────────────────────
 const tzCal = {
     key: [
-        'sleep_duration',
+        'checkin_interval',
         'sleep_enabled',
         'calibration_target',
         'capture_dry',
@@ -174,13 +183,11 @@ const tzCal = {
         // sleep_duration and sleep_enabled are device-wide (no withEndpoint) so
         // entity may be the Device object rather than an Endpoint, which would
         // cause UNSUPPORTED_CLUSTER. Always route them to endpoint 1 explicitly.
-        if (key === 'sleep_duration') {
+        if (key === 'checkin_interval') {
             const secs = Math.max(60, parseInt(value, 10));
-            // Use numeric cluster/attr IDs to bypass z2m-herdsman's endpoint
-            // cluster-list guard (avoids UNSUPPORTED_CLUSTER if interview data
-            // is stale / incomplete).
-            await meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0003: {value: secs, type: Zcl.DataType.UINT32}});
-            return {state: {sleep_duration: secs}};
+            // Write standard genPollCtrl checkinInterval (quarter-seconds).
+            await meta.device.getEndpoint(1).write('genPollCtrl', {checkinInterval: secs * 4});
+            return {state: {checkin_interval: secs}};
         }
         if (key === 'sleep_enabled') {
             const en = (value === 'ON' || value === true || value === 1) ? 1 : 0;
@@ -189,9 +196,8 @@ const tzCal = {
         }
     },
     convertGet: async (entity, key, meta) => {
-        if (key === 'sleep_duration') {
-            // Numeric IDs bypass the cluster-list guard in z2m-herdsman.
-            await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0003]);
+        if (key === 'checkin_interval') {
+            await meta.device.getEndpoint(1).read('genPollCtrl', ['checkinInterval']);
         } else if (key === 'sleep_enabled') {
             await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0004]);
         } else if (key === 'cal_dry' || key === 'cal_wet') {
@@ -236,9 +242,9 @@ function buildExposes() {
             .withDescription('Battery voltage (100 mV resolution).'),
         e.text('firmware_version', ea.STATE)
             .withDescription('Installed firmware version (e.g. 1.0.0). Updated when device checks for OTA.'),
-        e.numeric('sleep_duration', ea.ALL)
+        e.numeric('checkin_interval', ea.ALL)
             .withUnit('s')
-            .withDescription('Deep-sleep interval in seconds (writable). Minimum 60 s. Takes effect on next wake-up.'),
+            .withDescription('How often the device wakes to report (seconds). > 60 s → deep-sleep between cycles; ≤ 60 s → stay awake. Standard genPollCtrl check-in interval (divide by 4 = quarter-seconds on wire). Minimum 60 s. Takes effect on next wake-up.'),
         e.binary('sleep_enabled', ea.ALL, 'ON', 'OFF')
             .withDescription('Enable deep-sleep between readings. OFF = stay awake (development mode, default). ON = sleep between readings.'),
         e.binary('user_led', ea.ALL, 'ON', 'OFF')
@@ -287,7 +293,7 @@ export default {
     model:       'ZB-SoilMeasure',
     vendor:      'JLT',
     description: 'Zigbee soil moisture sensor – 1 to 9 probes, ADS1115 + onboard ADC, battery powered, deep-sleep capable.',
-    fromZigbee:  [fzMoisture, battery, fzCal, fzFirmwareVersion, fzLed],
+    fromZigbee:  [fzMoisture, battery, fzCal, fzPollCtrl, fzFirmwareVersion, fzLed],
     toZigbee:    [tzCal, tzLed],
     exposes:     buildExposes(),
     ota:         true,
@@ -298,9 +304,9 @@ export default {
     // this, incoming frames stay as the raw numeric cluster 64529 and fzCal
     // (which matches cluster: 'jltSoilCal') never fires → no raw_adc / cal values.
     extend:      [deviceAddCustomCluster(CAL_CLUSTER_NAME, CAL_CLUSTER_DEF)],
-    // Re-push sleep_enabled and sleep_duration to the device on every wakeup so
-    // that changes made in z2m while the device was sleeping take effect on the
-    // next wakeup period (the write is silently lost when the device is asleep;
+    // Re-push sleep_enabled and checkin_interval to the device on every wakeup
+    // so that changes made in z2m while the device was sleeping take effect on
+    // the next wakeup period (the write is silently lost when the device is asleep;
     // z2m does not automatically retry it).
     onEvent: async (type, data, device, settings, state) => {
         if (type !== 'deviceAnnounce') return;
@@ -310,9 +316,9 @@ export default {
             const en = (state.sleep_enabled === 'ON' || state.sleep_enabled === true) ? 1 : 0;
             ep.write(CAL_CLUSTER_CODE, {0x0004: {value: en, type: Zcl.DataType.UINT8}}).catch(() => {});
         }
-        if (state?.sleep_duration !== undefined) {
-            const secs = Math.max(60, parseInt(state.sleep_duration, 10));
-            ep.write(CAL_CLUSTER_CODE, {0x0003: {value: secs, type: Zcl.DataType.UINT32}}).catch(() => {});
+        if (state?.checkin_interval !== undefined) {
+            const qs = Math.max(240, Math.round(state.checkin_interval) * 4);
+            ep.write('genPollCtrl', {checkinInterval: qs}).catch(() => {});
         }
     },
     // Bind coordinator to each sensor endpoint so z2m routes incoming attribute
@@ -331,7 +337,7 @@ export default {
             // For sensor 1 also read device-wide attrs (sleep_duration 0x0003, sleep_enabled 0x0004)
             // in the same request to avoid a separate round-trip that can time out.
             const calAttrs = i === 1
-                ? [0x0001, 0x0002, 0x0003, 0x0004, 0x0005]
+                ? [0x0001, 0x0002, 0x0004, 0x0005]
                 : [0x0001, 0x0002, 0x0005];
             try { await ep.read(CAL_CLUSTER_CODE, calAttrs); } catch (_) {}
         }
@@ -339,6 +345,8 @@ export default {
         try { await device.getEndpoint(1).read('genOta', ['currentFileVersion']); } catch (_) {}
         // Read battery percentage + voltage (genPowerCfg) so battery / voltage populate.
         try { await device.getEndpoint(1).read('genPowerCfg', ['batteryPercentageRemaining', 'batteryVoltage']); } catch (_) {}
+        // Read check_in_interval from genPollCtrl (endpoint 1) so checkin_interval populates.
+        try { await device.getEndpoint(1).read('genPollCtrl', ['checkinInterval']); } catch (_) {}
         // Read the user LED on/off state (endpoint 4) so user_led populates.
         try { await device.getEndpoint(4).read('genOnOff', ['onOff']); } catch (_) {}
     },

@@ -7,10 +7,17 @@
 static uint16_t s_calDry[10];
 static uint16_t s_calWet[10];
 static uint16_t s_rawAdc[10]     = {};  // last raw ADC reading per sensor (read-only attribute)
-static uint32_t s_sleepSec;            // device-wide sleep duration (seconds)
 static uint8_t  s_sleepEnabled;        // device-wide: 0 = awake mode, 1 = deep-sleep mode
 static uint8_t  s_reportNowAttr = 0;   // ZCL backing store for report_now attribute
 static volatile bool s_reportNow = false; // set by Zigbee task, read by app task
+
+// ── genPollCtrl (0x0020) backing stores – quarter-second units ───────────────
+// check_in_interval is the user-visible sleep interval (÷4 = seconds).
+// The other three are required by the cluster spec but not user-facing.
+static uint32_t s_checkInIntervalQs;   // attr 0x0000 – initialised from NVS in updateCalFromNvs()
+static uint32_t s_longPollIntervalQs  = 20;  // attr 0x0001 – 5 s (fixed)
+static uint16_t s_shortPollIntervalQs = 2;   // attr 0x0002 – 0.5 s (fixed)
+static uint16_t s_fastPollTimeoutQs   = 40;  // attr 0x0003 – 10 s (fixed)
 
 // =============================================================================
 // Constructor
@@ -21,6 +28,9 @@ ZigbeeSoilSensor::ZigbeeSoilSensor(uint8_t endpoint, uint8_t sensorIdx)
     // Calibration is lazy-init safe – NVS will be opened on first access.
     addHumiditySensor();       // add Relative Humidity cluster (0x0405)
     _addCalibrationCluster();  // add writable calibration cluster (0xFC11)
+    if (_sensorIdx == 0) {
+        _addPollControlCluster();  // genPollCtrl (0x0020) – device-wide sleep interval
+    }
 }
 
 // =============================================================================
@@ -34,8 +44,9 @@ void ZigbeeSoilSensor::_addCalibrationCluster() {
     // Store initial values in static arrays – ZCL holds a pointer to these.
     s_calDry[_sensorIdx] = cal.dryAdc;
     s_calWet[_sensorIdx] = cal.wetAdc;
-    s_sleepSec     = Calibration.getSleepSeconds();
-    s_sleepEnabled = Calibration.getSleepEnabled() ? 1u : 0u;
+    if (_sensorIdx == 0) {
+        s_sleepEnabled = Calibration.getSleepEnabled() ? 1u : 0u;
+    }
 
     esp_zb_attribute_list_t *attrs = esp_zb_zcl_attr_list_create(CAL_CLUSTER_ID);
 
@@ -50,12 +61,6 @@ void ZigbeeSoilSensor::_addCalibrationCluster() {
         ESP_ZB_ZCL_ATTR_TYPE_U16,
         ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE,
         &s_calWet[_sensorIdx]);
-
-    esp_zb_custom_cluster_add_custom_attr(
-        attrs, CAL_ATTR_SLEEP,
-        ESP_ZB_ZCL_ATTR_TYPE_U32,
-        ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE,
-        &s_sleepSec);
 
     esp_zb_custom_cluster_add_custom_attr(
         attrs, CAL_ATTR_SLEEP_ENABLE,
@@ -81,13 +86,56 @@ void ZigbeeSoilSensor::_addCalibrationCluster() {
 }
 
 // =============================================================================
+// _addPollControlCluster()
+// Adds the standard genPollCtrl cluster (0x0020) to endpoint 1.
+// check_in_interval (attr 0x0000, quarter-seconds) drives the firmware sleep
+// interval: the app reads Calibration.getSleepSeconds() which is kept in sync.
+// Pointer-backed statics let updateCalFromNvs() refresh the ZCL value before
+// Zigbee.begin(), matching the pattern used for calibration attributes.
+// =============================================================================
+void ZigbeeSoilSensor::_addPollControlCluster() {
+    // Default from config.h; NVS value applied later by updateCalFromNvs().
+    s_checkInIntervalQs = (uint32_t)SLEEP_DURATION_SEC * 4u;
+
+    esp_zb_attribute_list_t *pc = esp_zb_zcl_attr_list_create(0x0020 /*genPollCtrl*/);
+    // attr 0x0000 – check_in_interval (UINT32, R/W)
+    esp_zb_custom_cluster_add_custom_attr(pc, 0x0000,
+        ESP_ZB_ZCL_ATTR_TYPE_U32, ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE, &s_checkInIntervalQs);
+    // attr 0x0001 – long_poll_interval (UINT32, R/O)
+    esp_zb_custom_cluster_add_custom_attr(pc, 0x0001,
+        ESP_ZB_ZCL_ATTR_TYPE_U32, ESP_ZB_ZCL_ATTR_ACCESS_READ_ONLY,  &s_longPollIntervalQs);
+    // attr 0x0002 – short_poll_interval (UINT16, R/O)
+    esp_zb_custom_cluster_add_custom_attr(pc, 0x0002,
+        ESP_ZB_ZCL_ATTR_TYPE_U16, ESP_ZB_ZCL_ATTR_ACCESS_READ_ONLY,  &s_shortPollIntervalQs);
+    // attr 0x0003 – fast_poll_timeout (UINT16, R/W)
+    esp_zb_custom_cluster_add_custom_attr(pc, 0x0003,
+        ESP_ZB_ZCL_ATTR_TYPE_U16, ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE, &s_fastPollTimeoutQs);
+    esp_zb_cluster_list_add_custom_cluster(_cluster_list, pc, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+}
+
+// =============================================================================
 // zbAttributeSet()
 // Called by the Zigbee stack whenever the coordinator writes an attribute on
-// this endpoint.  Only cluster 0xFC11 (calibration) is handled here.
+// this endpoint.  Handles cluster 0xFC11 (calibration) and cluster 0x0020
+// (genPollCtrl – check_in_interval → sleep duration).
 // =============================================================================
 void ZigbeeSoilSensor::zbAttributeSet(const esp_zb_zcl_set_attr_value_message_t *message) {
-    if (message->info.status  != ESP_ZB_ZCL_STATUS_SUCCESS) return;
-    if (message->info.cluster != CAL_CLUSTER_ID)            return;
+    if (message->info.status != ESP_ZB_ZCL_STATUS_SUCCESS) return;
+
+    // ── genPollCtrl (0x0020) – device-wide sleep interval ────────────────────
+    if (message->info.cluster == 0x0020U) {
+        if (message->attribute.id == 0x0000U) {  // check_in_interval
+            uint32_t qs   = *reinterpret_cast<const uint32_t *>(message->attribute.data.value);
+            uint32_t secs = (qs / 4u < 60u) ? 60u : (qs / 4u);
+            s_checkInIntervalQs = secs * 4u;
+            Calibration.setSleepSeconds(secs);
+            Serial.printf("[pollCtrl] check_in_interval → %lu s\n", (unsigned long)secs);
+        }
+        return;
+    }
+
+    // ── jltSoilCal (0xFC11) ──────────────────────────────────────────────────
+    if (message->info.cluster != CAL_CLUSTER_ID) return;
 
     SensorCalibration cal = Calibration.get(_sensorIdx);
 
@@ -98,14 +146,6 @@ void ZigbeeSoilSensor::zbAttributeSet(const esp_zb_zcl_set_attr_value_message_t 
         case CAL_ATTR_WET:
             cal.wetAdc = *reinterpret_cast<const uint16_t *>(message->attribute.data.value);
             break;
-        case CAL_ATTR_SLEEP: {
-            uint32_t secs = *reinterpret_cast<const uint32_t *>(message->attribute.data.value);
-            if (secs > 0) {
-                s_sleepSec = secs;
-                Calibration.setSleepSeconds(secs);
-            }
-            return;   // not a calibration attribute – skip Calibration.set() below
-        }
         case CAL_ATTR_SLEEP_ENABLE: {
             uint8_t en = *reinterpret_cast<const uint8_t *>(message->attribute.data.value);
             s_sleepEnabled = en;
@@ -156,7 +196,8 @@ void ZigbeeSoilSensor::updateCalFromNvs() {
     // Device-wide attrs: only update if we own sensor index 0 to avoid
     // overwriting values already set by a sibling sensor instance.
     if (_sensorIdx == 0) {
-        s_sleepSec     = Calibration.getSleepSeconds();
+        // Refresh genPollCtrl backing store so the ZCL attribute reflects NVS.
+        s_checkInIntervalQs = (uint32_t)Calibration.getSleepSeconds() * 4u;
         s_sleepEnabled = Calibration.getSleepEnabled() ? 1u : 0u;
     }
 }
@@ -209,7 +250,6 @@ bool ZigbeeSoilSensor::reportRawAdc() {
     // Device-wide attributes – report only from sensor 0 (endpoint 1) to avoid
     // duplicate frames; the values live in shared static storage.
     if (_sensorIdx == 0) {
-        ok &= _reportCustomAttr(CAL_ATTR_SLEEP);
         ok &= _reportCustomAttr(CAL_ATTR_SLEEP_ENABLE);
     }
     return ok;
