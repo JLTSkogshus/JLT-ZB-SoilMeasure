@@ -68,17 +68,22 @@ static const SensorAdcConfig SENSOR_ADC_CONFIG[10] = {
 //
 //   All sensor VCC ──────────── 3.3 V
 //   All sensor GND ─── BC337 collector
+//   ADS1115 GND    ─── BC337 collector  ← also switched (saves ~200 μA during sleep)
+//   ADS1115 VDD    ─── 3.3 V  (always)
 //   BC337 emitter  ─── board GND
-//   D3 ──[10 kΩ]───────── BC337 base
+//   D6 ──[10 kΩ]───────── BC337 base
 //   BC337 base ──[100 kΩ]── GND   ← pull-down: keeps transistor off if GPIO floats during sleep
 //
-//   GPIO HIGH = transistor on  = sensors grounded = sensors active
-//   GPIO LOW  = transistor off = sensors draw no current
+//   GPIO HIGH = transistor on  = sensors + ADS1115 grounded = active
+//   GPIO LOW  = transistor off = no current drawn
 //   Deep sleep: GPIO floats LOW (held by pull-down) – no active driving needed
 //
+// NOTE: ADS1115 VDD stays at 3.3 V; only GND is switched so no extra decoupling needed.
+// The ADS1115 is re-initialised automatically on each adcPowerOn() call.
+//
 // Change SENSOR_POWER_PIN to any free digital output on your board.
-#define SENSOR_POWER_PIN        D3    // GPIO controlling BC337 base (via 10 kΩ)
-#define SENSOR_POWER_SETTLE_MS  50    // ms after power-on before reading (sensor stabilise)
+#define SENSOR_POWER_PIN        D6    // GPIO controlling BC337 base (via 10 kΩ)
+#define SENSOR_POWER_SETTLE_MS  50    // ms after power-on before reading (sensor + ADS1115 stabilise)
 
 // ── ADC Sampling ──────────────────────────────────────────────────────────────
 #define ADC_SAMPLES   10   // Readings to average per sensor/battery sample
