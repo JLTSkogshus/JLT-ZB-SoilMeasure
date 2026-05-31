@@ -33,7 +33,9 @@ jobs:
           MIN=$(( (DEC >> 16) & 0xFF ))
           PAT=$(( (DEC >>  8) & 0xFF ))
           TAG="v${MAJ}.${MIN}.${PAT}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          BARE="${MAJ}.${MIN}.${PAT}"
+          echo "tag=${TAG}"   >> $GITHUB_OUTPUT
+          echo "bare=${BARE}" >> $GITHUB_OUTPUT
           echo "Detected version: ${TAG}  (${HEX})"
           # Only release on push to master when this major.minor.patch tag is new.
           if [[ "${{ github.event_name }}" == "push" ]] && ! git tag | grep -qx "${TAG}"; then
@@ -89,10 +91,10 @@ jobs:
         run: |
           python3 tools/create_ota_image.py \
             "build/${{ env.SKETCH }}.ino.bin" \
-            "${{ steps.ver.outputs.tag }}" \
-            "build/JLT-ZB-SoilMeasure_v${{ steps.ver.outputs.tag }}.zigbee"
+            "${{ steps.ver.outputs.bare }}" \
+            "build/JLT-ZB-SoilMeasure_${{ steps.ver.outputs.tag }}.zigbee"
           # Fixed-name copies → stable /releases/latest/download/ URLs
-          cp "build/JLT-ZB-SoilMeasure_v${{ steps.ver.outputs.tag }}.zigbee" \
+          cp "build/JLT-ZB-SoilMeasure_${{ steps.ver.outputs.tag }}.zigbee" \
              "build/JLT-ZB-SoilMeasure.zigbee"
           cp "build/${{ env.SKETCH }}.ino.bin" \
              "build/JLT-ZB-SoilMeasure.bin"
@@ -124,9 +126,9 @@ jobs:
         if: steps.ver.outputs.is_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          name: "v${{ steps.ver.outputs.tag }}"
+          name: "${{ steps.ver.outputs.tag }}"
           body: |
-            ## JLT ZB-SoilMeasure v${{ steps.ver.outputs.tag }}
+            ## JLT ZB-SoilMeasure ${{ steps.ver.outputs.tag }}
 
             | File | Purpose |
             |------|---------|
@@ -138,7 +140,7 @@ jobs:
             | `*.zigbee` | **OTA update via zigbee2mqtt** (no USB needed) |
 
             ### OTA update steps
-            1. Copy `JLT-ZB-SoilMeasure_v${{ steps.ver.outputs.tag }}.zigbee` to your zigbee2mqtt data directory
+            1. Copy `JLT-ZB-SoilMeasure_${{ steps.ver.outputs.tag }}.zigbee` to your zigbee2mqtt data directory
             2. In z2m web UI: **Devices → JLT ZB-SoilMeasure → OTA → Perform update**
             3. The device picks up the update on its next wake-up (within `sleep_duration` seconds)
 
@@ -147,13 +149,13 @@ jobs:
             arduino-cli upload \
               --fqbn "esp32:esp32:XIAO_ESP32C6:ZigbeeMode=ed,PartitionScheme=zigbee" \
               --port COM<N> \
-              --input-file JLT-ZB-SoilMeasure_v${{ steps.ver.outputs.tag }}.ino.bin
+              --input-file JLT-ZB-SoilMeasure_${{ steps.ver.outputs.tag }}.ino.bin
             ```
           files: |
             build/${{ env.SKETCH }}.ino.bin
             build/${{ env.SKETCH }}.ino.bootloader.bin
             build/${{ env.SKETCH }}.ino.partitions.bin
-            build/JLT-ZB-SoilMeasure_v${{ steps.ver.outputs.tag }}.zigbee
+            build/JLT-ZB-SoilMeasure_${{ steps.ver.outputs.tag }}.zigbee
             build/JLT-ZB-SoilMeasure.zigbee
             build/JLT-ZB-SoilMeasure.bin
           draft: false
