@@ -234,7 +234,7 @@ function buildExposes() {
             .withDescription('Installed firmware version (e.g. 1.0.0). Updated when device checks for OTA.'),
         e.numeric('checkin_interval', ea.ALL)
             .withUnit('s')
-            .withDescription('How often the device wakes to report (seconds). > 60 s → deep-sleep between cycles; ≤ 60 s → stay awake. Standard genPollCtrl check-in interval (divide by 4 = quarter-seconds on wire). Minimum 60 s. Takes effect on next wake-up.'),
+            .withDescription('Deep-sleep duration between reporting cycles (seconds, minimum 60). Takes effect on next wake-up. Enable sleep with sleep_enabled = ON.'),
         e.binary('sleep_enabled', ea.ALL, 'ON', 'OFF')
             .withDescription('Enable deep-sleep between readings. OFF = stay awake (development mode, default). ON = sleep between readings.'),
         e.binary('user_led', ea.ALL, 'ON', 'OFF')
