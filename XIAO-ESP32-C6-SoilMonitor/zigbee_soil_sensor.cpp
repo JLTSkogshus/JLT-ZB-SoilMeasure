@@ -11,13 +11,10 @@ static uint8_t  s_sleepEnabled;        // device-wide: 0 = awake mode, 1 = deep-
 static uint8_t  s_reportNowAttr = 0;   // ZCL backing store for report_now attribute
 static volatile bool s_reportNow = false; // set by Zigbee task, read by app task
 
-// ── genPollCtrl (0x0020) backing stores – quarter-second units ───────────────
-// check_in_interval is the user-visible sleep interval (÷4 = seconds).
-// The other three are required by the cluster spec but not user-facing.
-static uint32_t s_checkInIntervalQs;   // attr 0x0000 – initialised from NVS in updateCalFromNvs()
-static uint32_t s_longPollIntervalQs  = 20;  // attr 0x0001 – 5 s (fixed)
-static uint16_t s_shortPollIntervalQs = 2;   // attr 0x0002 – 0.5 s (fixed)
-static uint16_t s_fastPollTimeoutQs   = 40;  // attr 0x0003 – 10 s (fixed)
+// ── genPollCtrl (0x0020) staging store – quarter-second units ───────────────
+// Holds the desired check_in_interval value from NVS so applyCheckInInterval()
+// can push it into the ZCL attribute after Zigbee.begin().
+static uint32_t s_checkInIntervalQs;   // seeded from NVS in updateCalFromNvs()
 
 // =============================================================================
 // Constructor
@@ -87,30 +84,34 @@ void ZigbeeSoilSensor::_addCalibrationCluster() {
 
 // =============================================================================
 // _addPollControlCluster()
-// Adds the standard genPollCtrl cluster (0x0020) to endpoint 1.
-// check_in_interval (attr 0x0000, quarter-seconds) drives the firmware sleep
-// interval: the app reads Calibration.getSleepSeconds() which is kept in sync.
-// Pointer-backed statics let updateCalFromNvs() refresh the ZCL value before
-// Zigbee.begin(), matching the pattern used for calibration attributes.
+// Adds genPollCtrl (0x0020) to endpoint 1 using the NATIVE cluster creation
+// API.  This ensures the cluster appears in the Simple Descriptor so that
+// zigbee2mqtt (via zigbee-herdsman) can verify the device supports it before
+// sending ZCL Write Attributes – avoiding the UNSUPPORTED_CLUSTER rejection
+// that occurs when the cluster is registered via esp_zb_cluster_list_add_custom_cluster.
+//
+// Actual check_in_interval value is pushed into the ZCL store after
+// Zigbee.begin() + connected via applyCheckInInterval().
 // =============================================================================
 void ZigbeeSoilSensor::_addPollControlCluster() {
-    // Default from config.h; NVS value applied later by updateCalFromNvs().
-    s_checkInIntervalQs = (uint32_t)SLEEP_DURATION_SEC * 4u;
+    s_checkInIntervalQs = (uint32_t)SLEEP_DURATION_SEC * 4u;  // staging; overwritten by updateCalFromNvs()
+    esp_zb_poll_control_cluster_cfg_t cfg = {};
+    esp_zb_attribute_list_t *pc = esp_zb_poll_control_cluster_create(&cfg);
+    esp_zb_cluster_list_add_poll_control_cluster(_cluster_list, pc, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+}
 
-    esp_zb_attribute_list_t *pc = esp_zb_zcl_attr_list_create(0x0020 /*genPollCtrl*/);
-    // attr 0x0000 – check_in_interval (UINT32, R/W)
-    esp_zb_custom_cluster_add_custom_attr(pc, 0x0000,
-        ESP_ZB_ZCL_ATTR_TYPE_U32, ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE, &s_checkInIntervalQs);
-    // attr 0x0001 – long_poll_interval (UINT32, R/O)
-    esp_zb_custom_cluster_add_custom_attr(pc, 0x0001,
-        ESP_ZB_ZCL_ATTR_TYPE_U32, ESP_ZB_ZCL_ATTR_ACCESS_READ_ONLY,  &s_longPollIntervalQs);
-    // attr 0x0002 – short_poll_interval (UINT16, R/O)
-    esp_zb_custom_cluster_add_custom_attr(pc, 0x0002,
-        ESP_ZB_ZCL_ATTR_TYPE_U16, ESP_ZB_ZCL_ATTR_ACCESS_READ_ONLY,  &s_shortPollIntervalQs);
-    // attr 0x0003 – fast_poll_timeout (UINT16, R/W)
-    esp_zb_custom_cluster_add_custom_attr(pc, 0x0003,
-        ESP_ZB_ZCL_ATTR_TYPE_U16, ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE, &s_fastPollTimeoutQs);
-    esp_zb_cluster_list_add_custom_cluster(_cluster_list, pc, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+// =============================================================================
+// applyCheckInInterval()
+// Writes s_checkInIntervalQs (set by updateCalFromNvs()) into the ZCL
+// attribute store for the native genPollCtrl cluster.  Must be called after
+// Zigbee.begin() since esp_zb_zcl_set_attribute_val() needs the stack running.
+// =============================================================================
+void ZigbeeSoilSensor::applyCheckInInterval() {
+    esp_zb_lock_acquire(portMAX_DELAY);
+    esp_zb_zcl_set_attribute_val(
+        _endpoint, 0x0020U, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+        0x0000U, &s_checkInIntervalQs, false);
+    esp_zb_lock_release();
 }
 
 // =============================================================================

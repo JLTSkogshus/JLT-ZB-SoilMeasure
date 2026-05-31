@@ -30,6 +30,9 @@ public:
     // Zigbee.begin(), so the ZCL attributes reflect the correct stored values
     // regardless of whether NVS was ready during the static constructor.
     void updateCalFromNvs();
+    // Push the NVS-derived check_in_interval into the native genPollCtrl ZCL
+    // attribute store.  Must be called AFTER Zigbee.begin() + connected.
+    void applyCheckInInterval();
 
 protected:
     // Called by the Zigbee stack when the coordinator writes an attribute.

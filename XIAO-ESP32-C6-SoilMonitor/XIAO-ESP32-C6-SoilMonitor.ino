@@ -163,6 +163,11 @@ void setup() {
   }
   Serial.println("Zigbee connected!");
 
+  // Push the NVS check_in_interval into the native genPollCtrl ZCL attribute.
+  // Must happen after Zigbee.begin() since esp_zb_zcl_set_attribute_val needs
+  // the stack running.  This makes the value readable from z2m immediately.
+  zbSoil0.applyCheckInInterval();
+
   // ── Record connection timestamp ──────────────────────────────────────────────
   s_lastConnectionSec = millis() / 1000;
 
