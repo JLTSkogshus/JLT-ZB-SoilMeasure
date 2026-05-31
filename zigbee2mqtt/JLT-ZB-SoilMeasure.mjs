@@ -36,6 +36,7 @@ import {Zcl}         from 'zigbee-herdsman';
 import {battery}     from 'zigbee-herdsman-converters/converters/fromZigbee';
 import {presets as e, access as ea} from 'zigbee-herdsman-converters/lib/exposes';
 import {deviceAddCustomCluster}     from 'zigbee-herdsman-converters/lib/modernExtend';
+import {calibrateAndPrecisionRoundOptions} from 'zigbee-herdsman-converters/lib/utils';
 
 const NUM_SENSORS = 2;   // ← change this to match NUM_SENSORS in config.h
 
@@ -78,7 +79,10 @@ const fzMoisture = {
         if (msg.endpoint.ID === 1) {
             msg.endpoint.read('genPowerCfg', ['batteryVoltage']).catch(() => {});
         }
-        return {[`soil_moisture_sensor_${msg.endpoint.ID}`]: pct};
+        // Apply the z2m Settings calibration offset (soil_moisture_sensor_N_calibration)
+        // and precision (soil_moisture_sensor_N_precision) configured by the user.
+        const key = `soil_moisture_sensor_${msg.endpoint.ID}`;
+        return {[key]: calibrateAndPrecisionRoundOptions(pct, options, key)};
     },
 };
 
@@ -214,30 +218,6 @@ const tzCal = {
     },
 };
 
-// ─── fromZigbee: genOnOff → user_led (endpoint 4) ────────────────────────────
-const fzLed = {
-    cluster: 'genOnOff',
-    type: ['attributeReport', 'readResponse'],
-    convert(model, msg, publish, options, meta) {
-        if (msg.endpoint.ID === 4) {
-            return {user_led: msg.data['onOff'] ? 'ON' : 'OFF'};
-        }
-    },
-};
-
-// ─── toZigbee: user_led → genOnOff on/off command to endpoint 4 ──────────────
-const tzLed = {
-    key: ['user_led'],
-    convertSet: async (entity, key, value, meta) => {
-        const on = (value === 'ON' || value === true);
-        await meta.device.getEndpoint(4).command('genOnOff', on ? 'on' : 'off', {});
-        return {state: {user_led: on ? 'ON' : 'OFF'}};
-    },
-    convertGet: async (entity, key, meta) => {
-        await meta.device.getEndpoint(4).read('genOnOff', ['onOff']);
-    },
-};
-
 // ─── exposes ──────────────────────────────────────────────────────────────────
 function buildExposes() {
     const list = [
@@ -249,11 +229,11 @@ function buildExposes() {
             .withDescription('Installed firmware version (e.g. 1.0.0). Updated when device checks for OTA.'),
         e.numeric('checkin_interval', ea.ALL)
             .withUnit('s')
-            .withDescription('Deep-sleep duration between reporting cycles (seconds, minimum 60). Takes effect on next wake-up. Enable sleep with sleep_enabled = ON.'),
+            .withDescription('Deep-sleep duration between reporting cycles (seconds, minimum 60). Takes effect on next wake-up. Enable sleep with sleep_enabled = ON.')
+            .withCategory('config'),
         e.binary('sleep_enabled', ea.ALL, 'ON', 'OFF')
-            .withDescription('Enable deep-sleep between readings. OFF = stay awake (development mode, default). ON = sleep between readings.'),
-        e.binary('user_led', ea.ALL, 'ON', 'OFF')
-            .withDescription('Onboard user LED (GPIO15, active low).'),
+            .withDescription('Enable deep-sleep between readings. OFF = stay awake (development mode, default). ON = sleep between readings.')
+            .withCategory('config'),
         // ── Calibration UI ───────────────────────────────────────────────────────
         e.enum('calibration_target', ea.STATE_SET,
                Array.from({length: NUM_SENSORS}, (_, i) => `sensor_${i + 1}`))
@@ -286,7 +266,7 @@ function buildExposes() {
 }
 
 function endpointMap() {
-    const map = {user_led: 4};
+    const map = {};
     for (let i = 1; i <= NUM_SENSORS; i++) map[`sensor_${i}`] = i;
     return map;
 }
@@ -298,8 +278,8 @@ export default {
     model:       'ZB-SoilMeasure',
     vendor:      'JLT',
     description: 'Zigbee soil moisture sensor – 1 to 9 probes, ADS1115 + onboard ADC, battery powered, deep-sleep capable.',
-    fromZigbee:  [fzMoisture, battery, fzCal, fzFirmwareVersion, fzLed],
-    toZigbee:    [tzCal, tzLed],
+    fromZigbee:  [fzMoisture, battery, fzCal, fzFirmwareVersion],
+    toZigbee:    [tzCal],
     exposes:     buildExposes(),
     ota:         true,
     meta:        {multiEndpoint: true},
@@ -350,7 +330,6 @@ export default {
         try { await device.getEndpoint(1).read('genOta', ['currentFileVersion']); } catch (_) {}
         // Read battery percentage + voltage (genPowerCfg) so battery / voltage populate.
         try { await device.getEndpoint(1).read('genPowerCfg', ['batteryPercentageRemaining', 'batteryVoltage']); } catch (_) {}
-        // Read the user LED on/off state (endpoint 4) so user_led populates.
-        try { await device.getEndpoint(4).read('genOnOff', ['onOff']); } catch (_) {}
+
     },
 };
