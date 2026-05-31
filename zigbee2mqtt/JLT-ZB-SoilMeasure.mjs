@@ -298,6 +298,23 @@ export default {
     // this, incoming frames stay as the raw numeric cluster 64529 and fzCal
     // (which matches cluster: 'jltSoilCal') never fires → no raw_adc / cal values.
     extend:      [deviceAddCustomCluster(CAL_CLUSTER_NAME, CAL_CLUSTER_DEF)],
+    // Re-push sleep_enabled and sleep_duration to the device on every wakeup so
+    // that changes made in z2m while the device was sleeping take effect on the
+    // next wakeup period (the write is silently lost when the device is asleep;
+    // z2m does not automatically retry it).
+    onEvent: async (type, data, device, settings, state) => {
+        if (type !== 'deviceAnnounce') return;
+        const ep = device.getEndpoint(1);
+        if (!ep) return;
+        if (state?.sleep_enabled !== undefined) {
+            const en = (state.sleep_enabled === 'ON' || state.sleep_enabled === true) ? 1 : 0;
+            ep.write(CAL_CLUSTER_CODE, {0x0004: {value: en, type: Zcl.DataType.UINT8}}).catch(() => {});
+        }
+        if (state?.sleep_duration !== undefined) {
+            const secs = Math.max(60, parseInt(state.sleep_duration, 10));
+            ep.write(CAL_CLUSTER_CODE, {0x0003: {value: secs, type: Zcl.DataType.UINT32}}).catch(() => {});
+        }
+    },
     // Bind coordinator to each sensor endpoint so z2m routes incoming attribute
     // reports through the fromZigbee converters.  The device must be awake.
     configure: async (device, coordinatorEndpoint) => {
