@@ -3,7 +3,6 @@ name: Build & Release
 on:
   push:
     branches: [main, master]
-    tags: ['v[0-9]*']        # e.g. v1.1.0
   pull_request:
     branches: [main, master]
 
@@ -23,21 +22,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Parse version from tag (v1.2.3 → hex 0x01020300u) ────────────────────
+      # ── Parse version from config.h (OTA_RUNNING_VERSION 0xMMmmppbb) ─────────
       - name: Determine version
         id: ver
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            TAG="${GITHUB_REF#refs/tags/v}"
-            IFS='.' read -r maj min pat _rest <<< "$TAG"
-            HEX=$(printf "0x%02X%02X%02X00u" "${maj:-0}" "${min:-0}" "${pat:-0}")
-            echo "tag=$TAG"            >> $GITHUB_OUTPUT
-            echo "hex=$HEX"           >> $GITHUB_OUTPUT
-            echo "is_release=true"    >> $GITHUB_OUTPUT
+          HEX=$(grep -oP '#define OTA_RUNNING_VERSION\s+\K0x[0-9A-Fa-f]+' \
+            ${{ env.SKETCH }}/config.h)
+          DEC=$((HEX))
+          MAJ=$(( (DEC >> 24) & 0xFF ))
+          MIN=$(( (DEC >> 16) & 0xFF ))
+          PAT=$(( (DEC >>  8) & 0xFF ))
+          TAG="v${MAJ}.${MIN}.${PAT}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Detected version: ${TAG}  (${HEX})"
+          # Only release on push to master when this major.minor.patch tag is new.
+          if [[ "${{ github.event_name }}" == "push" ]] && ! git tag | grep -qx "${TAG}"; then
+            echo "is_release=true"  >> $GITHUB_OUTPUT
+            echo "→ New version – will create release."
           else
-            echo "tag=dev-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
-            echo "hex=0x00000000u"           >> $GITHUB_OUTPUT
-            echo "is_release=false"          >> $GITHUB_OUTPUT
+            echo "is_release=false" >> $GITHUB_OUTPUT
+            echo "→ Tag ${TAG} already exists or this is a PR – skipping release."
           fi
 
       # ── Arduino CLI ───────────────────────────────────────────────────────────
@@ -69,27 +73,6 @@ jobs:
           arduino-cli lib update-index
           arduino-cli lib install "Adafruit ADS1X15"
           arduino-cli lib install "Adafruit BusIO"
-
-      # ── Patch OTA_RUNNING_VERSION to match release tag ────────────────────────
-      - name: Patch firmware version
-        if: steps.ver.outputs.is_release == 'true'
-        env:
-          VER_HEX: ${{ steps.ver.outputs.hex }}
-          VER_TAG: ${{ steps.ver.outputs.tag }}
-        run: |
-          python3 - << 'PYEOF'
-          import re, os
-          hex_ver = os.environ['VER_HEX']
-          tag     = os.environ['VER_TAG']
-          path    = os.environ['SKETCH'] + '/config.h'
-          content = open(path).read()
-          content = re.sub(
-              r'#define OTA_RUNNING_VERSION\s+\S+',
-              f'#define OTA_RUNNING_VERSION    {hex_ver}',
-              content)
-          open(path, 'w').write(content)
-          print(f'OTA_RUNNING_VERSION → {hex_ver}  (v{tag})')
-          PYEOF
 
       # ── Compile ───────────────────────────────────────────────────────────────
       - name: Compile sketch
@@ -127,7 +110,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
 
-      # ── Create a GitHub Release on version tags ───────────────────────────────
+      # ── Create git tag for this release ──────────────────────────────────────
+      - name: Create git tag
+        if: steps.ver.outputs.is_release == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.ver.outputs.tag }}"
+          git push origin "${{ steps.ver.outputs.tag }}"
+
+      # ── Create a GitHub Release ───────────────────────────────────────────────
       - name: Create GitHub Release
         if: steps.ver.outputs.is_release == 'true'
         uses: softprops/action-gh-release@v2
