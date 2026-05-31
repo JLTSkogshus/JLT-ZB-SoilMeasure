@@ -214,9 +214,9 @@ void setup() {
     Serial.println("[sleep] Staying awake – reporting every sleep_duration s. "
                    "Set attr 0x0004=1 on cluster 0xFC11 to enable sleep.");
     for (;;) {
-      uint32_t interval_ms = (uint32_t)Calibration.getSleepSeconds() * 1000UL;
       uint32_t t0 = millis();
-      while (millis() - t0 < interval_ms) {
+      // Re-evaluate sleep_duration each tick so a z2m write takes effect within 100 ms.
+      while (millis() - t0 < (uint32_t)Calibration.getSleepSeconds() * 1000UL) {
         delay(100);
         if (zigbeeSoilGetReportNow()) {
           zigbeeSoilClearReportNow();
