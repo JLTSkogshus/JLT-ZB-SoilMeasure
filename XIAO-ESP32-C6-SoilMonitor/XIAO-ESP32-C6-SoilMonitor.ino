@@ -204,6 +204,9 @@ void setup() {
   // Sleep mode is controlled via cluster 0xFC11 attribute 0x0004 (sleep_enable).
   // Default: DISABLED (stays awake for development).
   // Set attr 0x0004 = 1 (or toggle the switch in z2m) to enable deep sleep.
+  Serial.printf("[sleep] NVS: sleep_en=%d  sleep_sec=%lu\n",
+                (int)Calibration.getSleepEnabled(),
+                (unsigned long)Calibration.getSleepSeconds());
   Serial.printf("[sleep] Sleep mode: %s\n",
                 Calibration.getSleepEnabled() ? "ENABLED" : "DISABLED (awake loop)");
 

@@ -12,8 +12,9 @@ void CalibrationManager::ensureInit() {
 }
 
 void CalibrationManager::begin() {
-    ensureInit();
-    Serial.println("[cal] NVS calibration store opened.");
+    bool ok = _prefs.begin(NVS_NS, false);
+    _initialized = true;
+    Serial.printf("[cal] NVS open: %s\n", ok ? "OK" : "FAILED");
 }
 
 SensorCalibration CalibrationManager::get(uint8_t idx) {
@@ -56,11 +57,11 @@ void CalibrationManager::setSleepSeconds(uint32_t seconds) {
 
 bool CalibrationManager::getSleepEnabled() {
     ensureInit();
-    return _prefs.getBool("sleep_en", false);  // default: awake mode
+    return _prefs.getUInt("sleep_en", 0) != 0;
 }
 
 void CalibrationManager::setSleepEnabled(bool enabled) {
     ensureInit();
-    _prefs.putBool("sleep_en", enabled);
+    _prefs.putUInt("sleep_en", enabled ? 1u : 0u);
     Serial.printf("[cal] Sleep mode %s\n", enabled ? "ENABLED" : "DISABLED");
 }
