@@ -213,6 +213,7 @@ void setup() {
     // (e.g. toggling the sleep switch in z2m) are processed while we wait.
     Serial.println("[sleep] Staying awake – reporting every sleep_duration s. "
                    "Set attr 0x0004=1 on cluster 0xFC11 to enable sleep.");
+    digitalWrite(LED_BUILTIN, LOW);   // LED on – indicates awake/dev mode
     for (;;) {
       uint32_t t0 = millis();
       // Re-evaluate sleep_duration each tick so a z2m write takes effect within 100 ms.
@@ -323,7 +324,7 @@ static void enterDeepSleep(uint32_t seconds) {
   Serial.printf("Sleeping %lu s – next wakeup at %lu s elapsed\n",
                 (unsigned long)seconds, (unsigned long)s_nextWakeupSec);
   Serial.flush();
-
+  digitalWrite(LED_BUILTIN, HIGH);  // LED off before sleeping
   esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000ULL);
   esp_deep_sleep_start();
 }
