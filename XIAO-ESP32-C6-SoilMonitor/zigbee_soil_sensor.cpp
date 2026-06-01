@@ -9,6 +9,7 @@ static uint16_t s_calWet[10];
 static uint16_t s_rawAdc[10]     = {};  // last raw ADC reading per sensor (read-only attribute)
 static uint8_t  s_sleepEnabled;        // device-wide: 0 = awake mode, 1 = deep-sleep mode
 static uint8_t  s_reportNowAttr = 0;   // ZCL backing store for report_now attribute
+static uint8_t  s_sensorPower   = 0;   // ZCL backing store for sensor_power attribute (D6)
 static volatile bool s_reportNow = false; // set by Zigbee task, read by app task
 
 // ── device-wide sleep duration (seconds) – attr 0x0003 in cluster 0xFC11 ─────
@@ -82,6 +83,15 @@ void ZigbeeSoilSensor::_addCalibrationCluster() {
         ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE,
         &s_reportNowAttr);
 
+    // attr 0x0007 – sensor power rail (D6), device-wide, only on endpoint 1
+    if (_sensorIdx == 0) {
+        esp_zb_custom_cluster_add_custom_attr(
+            attrs, CAL_ATTR_SENSOR_POWER,
+            ESP_ZB_ZCL_ATTR_TYPE_U8,
+            ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE,
+            &s_sensorPower);
+    }
+
     esp_zb_cluster_list_add_custom_cluster(
         _cluster_list, attrs,
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
@@ -125,6 +135,13 @@ void ZigbeeSoilSensor::zbAttributeSet(const esp_zb_zcl_set_attr_value_message_t 
         case CAL_ATTR_REPORT_NOW: {
             uint8_t val = *reinterpret_cast<const uint8_t *>(message->attribute.data.value);
             if (val) s_reportNow = true;
+            return;
+        }
+        case CAL_ATTR_SENSOR_POWER: {
+            uint8_t val = *reinterpret_cast<const uint8_t *>(message->attribute.data.value);
+            s_sensorPower = val;
+            digitalWrite(SENSOR_POWER_PIN, val ? HIGH : LOW);
+            Serial.printf("[cal] sensor_power \u2192 %s\n", val ? "ON" : "OFF");
             return;
         }
         default:

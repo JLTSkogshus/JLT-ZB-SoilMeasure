@@ -28,6 +28,7 @@
 #define CAL_ATTR_SLEEP_ENABLE 0x0004u   // uint8  R/W – 1 = deep-sleep on, 0 = stay awake (default)
 #define CAL_ATTR_RAW_ADC      0x0005u   // uint16 R   – last raw ADC reading (updated each report cycle)
 #define CAL_ATTR_REPORT_NOW   0x0006u   // uint8  W   – write 1 to trigger an immediate sensor report
+#define CAL_ATTR_SENSOR_POWER 0x0007u   // uint8  R/W – 1 = sensor power rail ON (D6 HIGH), 0 = OFF
 
 struct SensorCalibration {
     uint16_t dryAdc;   // ADC reading in dry air  → 0% moisture

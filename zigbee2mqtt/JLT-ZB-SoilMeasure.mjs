@@ -58,6 +58,7 @@ const CAL_CLUSTER_DEF = {
         sleepEnabled:  {name: 'sleepEnabled',  ID: 0x0004, type: Zcl.DataType.UINT8},
         rawAdc:        {name: 'rawAdc',        ID: 0x0005, type: Zcl.DataType.UINT16},
         reportNow:     {name: 'reportNow',     ID: 0x0006, type: Zcl.DataType.UINT8},
+        sensorPower:   {name: 'sensorPower',   ID: 0x0007, type: Zcl.DataType.UINT8},
     },
     commands:         {},
     commandsResponse: {},
@@ -130,6 +131,8 @@ const fzCal = {
         }
         const rawAdc = msg.data['rawAdc'] ?? msg.data[0x0005];
         if (rawAdc !== undefined) result[`raw_adc_sensor_${ep}`] = rawAdc;
+        const sp = msg.data['sensorPower'] ?? msg.data[0x0007];
+        if (sp !== undefined) result['sensor_power'] = sp ? 'ON' : 'OFF';
         return result;
     },
 };
@@ -139,6 +142,7 @@ const tzCal = {
     key: [
         'checkin_interval',
         'sleep_enabled',
+        'sensor_power',
         'calibration_target',
         'capture_dry',
         'capture_wet',
@@ -208,12 +212,19 @@ const tzCal = {
             meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0004: {value: en, type: Zcl.DataType.UINT8}}).catch(() => {});
             return {state: {sleep_enabled: en ? 'ON' : 'OFF'}};
         }
+        if (key === 'sensor_power') {
+            const val = (value === 'ON' || value === true || value === 1) ? 1 : 0;
+            meta.device.getEndpoint(1).write(CAL_CLUSTER_CODE, {0x0007: {value: val, type: Zcl.DataType.UINT8}}).catch(() => {});
+            return {state: {sensor_power: val ? 'ON' : 'OFF'}};
+        }
     },
     convertGet: async (entity, key, meta) => {
         if (key === 'checkin_interval') {
             await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0003]);
         } else if (key === 'sleep_enabled') {
             await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0004]);
+        } else if (key === 'sensor_power') {
+            await meta.device.getEndpoint(1).read(CAL_CLUSTER_CODE, [0x0007]);
         } else if (key === 'cal_dry' || key === 'cal_wet') {
             const epName = meta.endpoint_name || 'sensor_1';
             const epId   = parseInt(epName.replace('sensor_', ''), 10) || 1;
@@ -237,6 +248,8 @@ function buildExposes() {
             .withDescription('Deep-sleep duration between reporting cycles (seconds, minimum 60). Takes effect on next wake-up. Enable sleep with sleep_enabled = ON.'),
         e.binary('sleep_enabled', ea.ALL, 'ON', 'OFF')
             .withDescription('Enable deep-sleep between readings. OFF = stay awake (development mode, default). ON = sleep between readings.'),
+        e.binary('sensor_power', ea.ALL, 'ON', 'OFF')
+            .withDescription('Sensor power rail (D6). ON = sensors powered (HIGH). The firmware controls this automatically during each reading cycle.'),
         // ── Calibration UI ───────────────────────────────────────────────────────
         e.enum('calibration_target', ea.STATE_SET,
                Array.from({length: NUM_SENSORS}, (_, i) => `sensor_${i + 1}`))
