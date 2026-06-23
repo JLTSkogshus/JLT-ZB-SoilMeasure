@@ -56,28 +56,65 @@ void adcPowerOff() {
     digitalWrite(SENSOR_POWER_PIN, LOW);   // NPN: base LOW → transistor off → no current drawn
 }
 
-uint16_t adcReadRaw(uint8_t sensorIdx) {
+// Read a single raw sample (one conversion) for the given sensor index.
+// Returns a 12-bit normalised value (0–4095).
+static uint16_t adcSampleOnce(uint8_t sensorIdx) {
     const SensorAdcConfig &cfg = SENSOR_ADC_CONFIG[sensorIdx];
-    uint32_t sum = 0;
 
     if (cfg.source == ADC_ONBOARD) {
-        for (int i = 0; i < ADC_SAMPLES; i++) {
-            sum += (uint32_t)analogRead(cfg.pin);
-            delay(2);
-        }
-        return (uint16_t)(sum / ADC_SAMPLES);   // 12-bit, 0–4095
+        return (uint16_t)analogRead(cfg.pin);   // 12-bit, 0–4095
     }
 
     // ── ADS1115 ──────────────────────────────────────────────────────────────
     int idx = addrIdx(cfg.i2cAddr);
     if (!s_adsReady[idx]) return 0u;
 
-    for (int i = 0; i < ADC_SAMPLES; i++) {
-        int16_t raw = s_ads[idx].readADC_SingleEnded(cfg.channel);
-        sum += (raw > 0) ? (uint32_t)raw : 0u;
-        delay(2);
-    }
+    int16_t raw = s_ads[idx].readADC_SingleEnded(cfg.channel);
     // Normalise 16-bit (0–32767 at GAIN_ONE) → 12-bit (0–4095)
-    // so calibration values are the same regardless of ADC source.
-    return (uint16_t)((sum / ADC_SAMPLES) >> 3u);
+    return (raw > 0) ? (uint16_t)((uint32_t)raw >> 3u) : 0u;
+}
+
+// Simple insertion sort for small arrays.
+static void sortU16(uint16_t *arr, int n) {
+    for (int i = 1; i < n; i++) {
+        uint16_t key = arr[i];
+        int j = i - 1;
+        while (j >= 0 && arr[j] > key) { arr[j + 1] = arr[j]; j--; }
+        arr[j + 1] = key;
+    }
+}
+
+// Read all `count` sensors using ADC_SAMPLES interleaved rounds.
+// Each round samples every sensor once before moving to the next round,
+// spreading the readings evenly across time so noise from one moment does
+// not bias a single sensor.
+// After collecting ADC_SAMPLES readings per sensor the values are sorted and
+// the middle ADC_TRIM_SAMPLES readings are averaged (trimmed mean), discarding
+// the lowest and highest outliers.
+// Results (12-bit, 0–4095) are written into `results[0..count-1]`.
+void adcReadAllRaw(uint16_t *results, uint8_t count) {
+    // samples[sensor][round]
+    uint16_t samples[NUM_SENSORS][ADC_SAMPLES];
+
+    for (int round = 0; round < ADC_SAMPLES; round++) {
+        for (int s = 0; s < count; s++) {
+            samples[s][round] = adcSampleOnce(s);
+        }
+        delay(ADC_ROUND_DELAY_MS);   // brief pause between rounds
+    }
+
+    const int trim = (ADC_SAMPLES - ADC_TRIM_SAMPLES) / 2;  // samples to drop from each end
+    for (int s = 0; s < count; s++) {
+        sortU16(samples[s], ADC_SAMPLES);
+        uint32_t sum = 0;
+        for (int r = trim; r < trim + ADC_TRIM_SAMPLES; r++) {
+            sum += samples[s][r];
+        }
+        results[s] = (uint16_t)(sum / ADC_TRIM_SAMPLES);
+    }
+}
+
+// Legacy single-sensor read – kept for battery and other one-off reads.
+uint16_t adcReadRaw(uint8_t sensorIdx) {
+    return adcSampleOnce(sensorIdx);
 }

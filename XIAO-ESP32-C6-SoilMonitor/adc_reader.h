@@ -52,6 +52,12 @@ void adcPowerOn();
 // Drive SENSOR_POWER_PIN LOW – cuts sensor VCC during deep sleep.
 void adcPowerOff();
 
-// Read the averaged, normalised ADC value for a sensor (0-based index).
-// Returns 0–4095 for both onboard and ADS1115 sources.
+// Read all `count` sensors (0-based, first count entries in SENSOR_ADC_CONFIG)
+// using ADC_SAMPLES interleaved rounds and a trimmed mean of the middle
+// ADC_TRIM_SAMPLES readings.  Results are written into results[0..count-1].
+// Returns 0–4095 (12-bit normalised) per sensor.
+void adcReadAllRaw(uint16_t *results, uint8_t count);
+
+// Legacy single-sample read for one sensor (no averaging, no trimming).
+// Still used for battery reads and other one-off conversions.
 uint16_t adcReadRaw(uint8_t sensorIdx);

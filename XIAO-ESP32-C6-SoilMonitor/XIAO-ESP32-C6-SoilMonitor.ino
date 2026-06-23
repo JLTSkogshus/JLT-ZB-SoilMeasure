@@ -301,11 +301,13 @@ static void reportAllSensors() {
                 (unsigned long)s_nextWakeupSec,
                 (unsigned long)s_bootCount);
 
-  // Power sensors on, read, then immediately power off.
+  // Power sensors on, read all sensors with interleaved rounds + trimmed mean, then power off.
   // Sensors draw no current outside this window (NPN transistor switch).
   adcPowerOn();
+  uint16_t rawAdc[NUM_SENSORS];
+  adcReadAllRaw(rawAdc, NUM_SENSORS);        // ADC_SAMPLES rounds × all sensors → trimmed mean
   for (int i = 0; i < NUM_SENSORS; i++) {
-    uint16_t raw = adcReadRaw(i);            // averaged, normalised to 12-bit
+    uint16_t raw = rawAdc[i];                // trimmed mean, normalised to 12-bit
     SensorCalibration cal = Calibration.get(i);
     float moisture = constrain(
         (cal.dryAdc - (float)raw) * 100.0f / (float)(cal.dryAdc - cal.wetAdc),
