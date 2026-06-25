@@ -21,6 +21,8 @@ jobs:
       # ── Checkout ──────────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # ── Parse version from config.h (OTA_RUNNING_VERSION 0xMMmmppbb) ─────────
       - name: Determine version
@@ -32,12 +34,14 @@ jobs:
           MAJ=$(( (DEC >> 24) & 0xFF ))
           MIN=$(( (DEC >> 16) & 0xFF ))
           PAT=$(( (DEC >>  8) & 0xFF ))
-          TAG="v${MAJ}.${MIN}.${PAT}"
-          BARE="${MAJ}.${MIN}.${PAT}"
+          BLD=$(( DEC & 0xFF ))
+          TAG="v${MAJ}.${MIN}.${PAT}.${BLD}"
+          BARE="${MAJ}.${MIN}.${PAT}.${BLD}"
           echo "tag=${TAG}"   >> $GITHUB_OUTPUT
           echo "bare=${BARE}" >> $GITHUB_OUTPUT
+          echo "dec=${DEC}"   >> $GITHUB_OUTPUT
           echo "Detected version: ${TAG}  (${HEX})"
-          # Only release on push to master when this major.minor.patch tag is new.
+          # Only release on push when this exact OTA version tag is new.
           if [[ "${{ github.event_name }}" == "push" ]] && ! git tag | grep -qx "${TAG}"; then
             echo "is_release=true"  >> $GITHUB_OUTPUT
             echo "→ New version – will create release."
@@ -161,3 +165,40 @@ jobs:
             build/JLT-ZB-SoilMeasure.bin
           draft: false
           prerelease: false
+
+      # ── Update OTA index.json with the released fileVersion ──────────────────
+      - name: Update OTA index
+        if: steps.ver.outputs.is_release == 'true'
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = Path('ota/index.json')
+          data = json.loads(p.read_text(encoding='utf-8'))
+          if not isinstance(data, list) or not data:
+              raise SystemExit('ota/index.json must contain a non-empty list')
+
+          data[0]['url'] = 'https://github.com/JLTSkogshus/JLT-ZB-SoilMeasure/releases/latest/download/JLT-ZB-SoilMeasure.zigbee'
+          data[0]['manufacturerCode'] = 4097
+          data[0]['imageType'] = 4113
+          data[0]['fileVersion'] = int('${{ steps.ver.outputs.dec }}')
+          data[0]['modelId'] = 'ZB-SoilMeasure'
+          data[0]['force'] = False
+
+          p.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
+          print(f'Updated ota/index.json fileVersion to {data[0]["fileVersion"]}')
+          PY
+
+      - name: Commit OTA index update
+        if: steps.ver.outputs.is_release == 'true'
+        run: |
+          if git diff --quiet -- ota/index.json; then
+            echo "ota/index.json already up to date"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ota/index.json
+          git commit -m "ci: update ota index for ${{ steps.ver.outputs.tag }} [skip ci]"
+          git push
