@@ -120,6 +120,14 @@ void setup() {
 
   // ── Open NVS calibration store ───────────────────────────────────────────────
   Calibration.begin();
+#if FORCE_AWAKE_ON_FLASH
+  // Always start awake after a fresh flash so OTA and debugging work reliably.
+  // z2m can re-enable sleep via the sleep_enabled toggle once the device is stable.
+  if (Calibration.getSleepEnabled()) {
+    Calibration.setSleepEnabled(false);
+    Serial.println("[sleep] FORCE_AWAKE_ON_FLASH: cleared sleep_enabled in NVS.");
+  }
+#endif
   // Refresh ZCL attribute backing stores from NVS now that the store is open.
   // The static constructors may have run before NVS was ready, leaving the
   // ZCL attributes at their zero-initialised values.
