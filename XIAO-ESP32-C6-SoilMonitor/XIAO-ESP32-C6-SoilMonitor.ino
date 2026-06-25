@@ -150,12 +150,12 @@ void setup() {
   uint32_t joinStart = millis();
   while (!Zigbee.connected()) {
     if (millis() - joinStart > ZIGBEE_JOIN_TIMEOUT_MS) {
-      if (Calibration.getSleepEnabled()) {
+        if (Calibration.getSleepEnabled() && SLEEP_ON_JOIN_TIMEOUT) {
         Serial.println("Join timed out \u2013 going back to sleep.");
         enterDeepSleep(Calibration.getSleepSeconds());
       } else {
-        // Sleep disabled (dev mode) \u2013 keep retrying instead of sleeping.
-        Serial.println("Join timed out \u2013 retrying (sleep disabled).");
+          // Keep retrying join (sleep disabled or timeout sleep policy disabled).
+          Serial.println("Join timed out \u2013 retrying (awake mode).");
         joinStart = millis();
       }
     }
@@ -224,11 +224,16 @@ void setup() {
     Serial.println("[sleep] Staying awake – reporting every sleep_duration s. "
                    "Set attr 0x0004=1 on cluster 0xFC11 to enable sleep.");
     digitalWrite(LED_BUILTIN, LOW);   // LED on – indicates awake/dev mode
+    uint32_t lastAwakeOtaReqMs = 0;
     for (;;) {
       uint32_t t0 = millis();
       // Re-evaluate sleep_duration each tick so a z2m write takes effect within 100 ms.
       bool sleepRequestedMidCycle = false;
       while (millis() - t0 < (uint32_t)Calibration.getSleepSeconds() * 1000UL) {
+        if (lastAwakeOtaReqMs == 0 || (millis() - lastAwakeOtaReqMs) >= OTA_REQUEST_RETRY_MS) {
+          zbSoil0.requestOTAUpdate();
+          lastAwakeOtaReqMs = millis();
+        }
         delay(100);
         if (zigbeeSoilGetReportNow()) {
           zigbeeSoilClearReportNow();

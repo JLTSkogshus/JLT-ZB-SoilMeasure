@@ -93,7 +93,8 @@ static const SensorAdcConfig SENSOR_ADC_CONFIG[10] = {
 
 // ── Sleep / Timing ────────────────────────────────────────────────────────────
 #define SLEEP_DURATION_SEC      900    // Seconds between wake-ups (default: 15 min)
-#define ZIGBEE_JOIN_TIMEOUT_MS  30000  // ms to wait for Zigbee join before sleeping
+#define ZIGBEE_JOIN_TIMEOUT_MS  30000  // ms to wait for Zigbee join before retrying
+#define SLEEP_ON_JOIN_TIMEOUT      0   // 1: sleep on join timeout when sleep_enabled=ON, 0: keep retrying join (safer for OTA/debug)
 #define OTA_CHECK_WINDOW_MS     15000  // ms to wait for OTA push after each connect
 #define OTA_REQUEST_RETRY_MS     3000  // ms between repeated Query Next Image requests
 
@@ -102,7 +103,7 @@ static const SensorAdcConfig SENSOR_ADC_CONFIG[10] = {
 // Increment OTA_RUNNING_VERSION in every release so the device accepts the update.
 // The OTA image file created by tools/create_ota_image.py must carry a version
 // number HIGHER than the value compiled into the running firmware.
-#define OTA_RUNNING_VERSION    0x01030700u   // v1.3.6.0 – store sleep_en as uint32 (bool NVS bug on ESP32-C6)
+#define OTA_RUNNING_VERSION    0x01030800u   // v1.3.7.0 – store sleep_en as uint32 (bool NVS bug on ESP32-C6)
 #define OTA_HW_VERSION         0x0101u       // hardware revision (major.minor)
 
 // ── Zigbee Device Identity ────────────────────────────────────────────────────
