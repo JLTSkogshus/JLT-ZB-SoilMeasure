@@ -180,12 +180,19 @@ void setup() {
   // ── Check for OTA firmware update ────────────────────────────────
   // requestOTAUpdate() sends a Query Next Image Request to the coordinator.
   // The coordinator (zigbee2mqtt) will respond with image info if an update is
-  // staged.  We then wait OTA_CHECK_WINDOW_MS for the transfer to begin.
-  zbSoil0.requestOTAUpdate();
-  Serial.printf("[OTA] Checking for update (%u ms window)...\n", OTA_CHECK_WINDOW_MS);
+  // staged.  Retry the query every OTA_REQUEST_RETRY_MS while waiting so a
+  // single missed frame does not abort this wake cycle.
+  Serial.printf("[OTA] Checking for update (%u ms window, retry %u ms)...\n",
+                OTA_CHECK_WINDOW_MS, OTA_REQUEST_RETRY_MS);
   {
     uint32_t t0 = millis();
+    uint32_t lastReq = 0;
     while (!s_otaActive && (millis() - t0) < OTA_CHECK_WINDOW_MS) {
+      if (lastReq == 0 || (millis() - lastReq) >= OTA_REQUEST_RETRY_MS) {
+        zbSoil0.requestOTAUpdate();
+        lastReq = millis();
+        Serial.println("[OTA] Query Next Image Request sent");
+      }
       delay(100);
     }
   }
