@@ -238,6 +238,14 @@ void setup() {
       // Re-evaluate sleep_duration each tick so a z2m write takes effect within 100 ms.
       bool sleepRequestedMidCycle = false;
       while (millis() - t0 < (uint32_t)Calibration.getSleepSeconds() * 1000UL) {
+        // If OTA download started, stop everything and wait for it to finish.
+        if (s_otaActive) {
+          Serial.println("[OTA] Download active – pausing awake loop until done.");
+          while (s_otaActive) { delay(500); }
+          Serial.println("[OTA] Done – rebooting with new firmware.");
+          delay(2000);
+          ESP.restart();
+        }
         if (lastAwakeOtaReqMs == 0 || (millis() - lastAwakeOtaReqMs) >= OTA_REQUEST_RETRY_MS) {
           zbSoil0.requestOTAUpdate();
           lastAwakeOtaReqMs = millis();
@@ -254,6 +262,14 @@ void setup() {
           sleepRequestedMidCycle = true;
           break;
         }
+      }
+      // Also check before doing the scheduled report / OTA request.
+      if (s_otaActive) {
+        Serial.println("[OTA] Download active – pausing awake loop until done.");
+        while (s_otaActive) { delay(500); }
+        Serial.println("[OTA] Done – rebooting with new firmware.");
+        delay(2000);
+        ESP.restart();
       }
       reportAllSensors();
       zbSoil0.requestOTAUpdate();
