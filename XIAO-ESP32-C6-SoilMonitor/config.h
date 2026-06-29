@@ -104,7 +104,7 @@ static const SensorAdcConfig SENSOR_ADC_CONFIG[10] = {
 // Increment OTA_RUNNING_VERSION in every release so the device accepts the update.
 // The OTA image file created by tools/create_ota_image.py must carry a version
 // number HIGHER than the value compiled into the running firmware.
-#define OTA_RUNNING_VERSION    0x01030a00u   // v1.3.10.0 – fix awake-loop OTA blocking
+#define OTA_RUNNING_VERSION    0x01030b00u   // v1.3.11.0 – fix awake-loop OTA blocking
 #define OTA_HW_VERSION         0x0101u       // hardware revision (major.minor)
 
 // ── Zigbee Device Identity ────────────────────────────────────────────────────

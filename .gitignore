@@ -16,3 +16,4 @@ build/
 # OS clutter
 .DS_Store
 Thumbs.db
+zigbee2mqtt/configuration.yaml
